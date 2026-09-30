@@ -8,3 +8,7 @@ coverage/
 *.tsbuildinfo
 *.tgz
 .DS_Store
+examples/next-app/public/artifacts/*
+!examples/next-app/public/artifacts/.gitkeep
+examples/next-app/lib/generated/*
+!examples/next-app/lib/generated/.gitkeep

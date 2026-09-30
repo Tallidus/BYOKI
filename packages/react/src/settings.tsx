@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ProviderId } from "@byoki/core/browser";
 import type { ConnectionsClient, ConnectionsView, ModelView, UsageView } from "./client.js";
 
@@ -15,15 +15,25 @@ function money(value: number | null, status: "known" | "unknown"): string {
   return `$${value.toFixed(4)}`;
 }
 
-export function AIConnectionsSettings({ client }: { client: ConnectionsClient }) {
+export function AIConnectionsSettings({
+  client,
+  refreshToken = 0,
+}: {
+  client: ConnectionsClient;
+  /** Increment after a host request so usage reloads without resetting the form. */
+  refreshToken?: number;
+}) {
   const [view, setView] = useState<ConnectionsView | null>(null);
   const [usage, setUsage] = useState<UsageView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const statusId = useId();
+  const requestId = useRef(0);
+  const loaded = useRef(false);
 
   async function reload() {
-    setLoading(true);
+    const id = ++requestId.current;
+    if (!loaded.current) setLoading(true);
     setError(null);
     try {
       const to = new Date();
@@ -32,18 +42,21 @@ export function AIConnectionsSettings({ client }: { client: ConnectionsClient })
         client.getConnections(),
         client.getUsage(from.toISOString(), to.toISOString()),
       ]);
+      if (id !== requestId.current) return;
       setView(connections);
       setUsage(usageView);
+      loaded.current = true;
     } catch (caught) {
+      if (id !== requestId.current) return;
       setError(caught instanceof Error ? caught.message : "The settings could not be loaded.");
     } finally {
-      setLoading(false);
+      if (id === requestId.current) setLoading(false);
     }
   }
 
   useEffect(() => {
     void reload();
-  }, [client]);
+  }, [client, refreshToken]);
 
   return (
     <div className="byoki">
@@ -362,9 +375,9 @@ function ControlsSection({ view }: { view: ConnectionsView }) {
 }
 
 const STYLES = `
-.byoki { font-family: "Segoe UI", sans-serif; color: #1c1915; max-width: 960px; }
+.byoki { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; color: #1c1915; max-width: 960px; }
 .byoki-kicker { letter-spacing: 0.08em; text-transform: uppercase; color: #8a5a2a; font-size: 0.75rem; margin: 0; }
-.byoki h1 { font-family: Georgia, serif; font-weight: 500; margin: 0.2rem 0 1rem; }
+.byoki h1 { font-family: inherit; font-weight: 700; font-size: clamp(1.5rem, 3vw, 2rem); letter-spacing: -0.03em; line-height: 1.15; margin: 0.2rem 0 1rem; }
 .byoki h2 { font-size: 1.15rem; margin-top: 2rem; }
 .byoki-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
 .byoki-card, .byoki section { }

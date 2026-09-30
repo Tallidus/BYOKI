@@ -3,8 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node ../../scripts/generate-api-docs.mjs && node ../../scripts/generate-downloads.mjs",
+    "prebuild": "node ../../scripts/generate-api-docs.mjs && node ../../scripts/generate-downloads.mjs",
     "dev": "next dev",
     "build": "next build",
+    "start": "next start",
+    "pretypecheck": "node ../../scripts/generate-api-docs.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },

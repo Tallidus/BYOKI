@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AIConnectionsSettings } from "../src/settings.js";
 import type { ConnectionsClient, ConnectionsView, UsageView } from "../src/client.js";
@@ -74,5 +74,14 @@ describe("AIConnectionsSettings", () => {
     expect(screen.getByText(/A capability only controls routing/)).toBeTruthy();
     expect(screen.getByText(/Cost unavailable/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "Get a OpenAI key" })).toBeTruthy();
+  });
+
+  it("reloads usage when refreshToken changes", async () => {
+    const api = client();
+    const { rerender } = render(<AIConnectionsSettings client={api} refreshToken={0} />);
+    expect(await screen.findByRole("heading", { name: "Garage Assistant" })).toBeTruthy();
+    expect(api.getUsage).toHaveBeenCalledTimes(1);
+    rerender(<AIConnectionsSettings client={api} refreshToken={1} />);
+    await waitFor(() => expect(api.getUsage).toHaveBeenCalledTimes(2));
   });
 });

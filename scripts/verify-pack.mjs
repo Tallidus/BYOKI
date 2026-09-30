@@ -49,6 +49,11 @@ const dependencies = {};
 for (const [name, file] of tarballs) {
   dependencies[`@byoki/${name}`] = `file:${resolve(file).replaceAll("\\", "/")}`;
 }
+const packageManager = JSON.parse(readFileSync("package.json", "utf8")).packageManager;
+if (typeof packageManager !== "string" || !packageManager.startsWith("pnpm@")) {
+  console.error("Root package.json must pin packageManager to a pnpm version");
+  process.exit(1);
+}
 writeFileSync(
   join(consumer, "package.json"),
   JSON.stringify(
@@ -56,6 +61,10 @@ writeFileSync(
       name: "byoki-consumer",
       private: true,
       type: "module",
+      // The consumer lives outside this repo, so Corepack would otherwise
+      // download the newest pnpm. pnpm 11+ ignores package.json "pnpm.overrides"
+      // and then tries to fetch @byoki/* from the npm registry.
+      packageManager,
       dependencies,
       pnpm: { overrides: dependencies },
     },

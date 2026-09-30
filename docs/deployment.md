@@ -1,8 +1,31 @@
 # Deployment
 
+## Public demo
+
+The site at [https://byoki.eastonnielson.dev](https://byoki.eastonnielson.dev) is `examples/next-app`. On the Ubuntu host (Node 20):
+
+```bash
+corepack pnpm install --frozen-lockfile
+corepack pnpm build
+corepack pnpm --filter @byoki/example build
+```
+
+Run `next start` from `examples/next-app` (or `corepack pnpm --filter @byoki/example start`) with `PORT=3004`. Put the variables from `examples/next-app/.env.example` in the process environment. For the public site use:
+
+```
+SESSION_SECRET=<long random string>
+BYOKI_USE_MOCK=1
+BYOKI_STORE=memory
+BYOKI_PUBLIC_ORIGIN=https://byoki.eastonnielson.dev
+```
+
+`BYOKI_MASTER_KEY` is not required while `BYOKI_STORE=memory`. Nginx and the Cloudflare tunnel should pass the public `Host` and `X-Forwarded-Proto: https`. Redirects are built from those headers only when the host is allowed, so a bad forwarded host cannot send browsers to localhost or another site. The session cookie is `Secure` when the forwarded protocol is HTTPS.
+
+The example build writes package tarballs and `byoki-starter.zip` into `examples/next-app/public/artifacts`. `next start` serves them from `/artifacts/`.
+
 ## Development
 
-Generate two secrets and put them in `examples/next-app/.env.local`:
+Generate secrets and put them in `examples/next-app/.env.local`:
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
@@ -12,11 +35,13 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 BYOKI_MASTER_KEY=<32-byte base64 or hex key>
 SESSION_SECRET=<long random string>
 BYOKI_USE_MOCK=1
+BYOKI_STORE=memory
+BYOKI_SESSION_TTL_SECONDS=7200
 ```
 
-`BYOKI_MASTER_KEY` encrypts the development credential file at `examples/next-app/.data/store.json`. Losing the key makes stored credentials unreadable. Do not commit the key, the data file, or `.env.local`.
+`BYOKI_MASTER_KEY` encrypts the development credential file when `BYOKI_STORE=file` (or when `createAIConnectionsApp` is called without your own stores). Losing the key makes stored credentials unreadable. Do not commit the key, the data file, or `.env.local`. The public demo defaults to `BYOKI_STORE=memory` and does not write keys to disk.
 
-`BYOKI_USE_MOCK=1` uses the mock adapters. Remove it when you want the example to call OpenAI, Anthropic, and Gemini with user-supplied keys.
+`BYOKI_USE_MOCK=1` uses the mock adapters. That is also the demo default when the variable is unset. Set `BYOKI_USE_MOCK=0` when you want the example to call OpenAI, Anthropic, and Gemini with user-supplied keys.
 
 ## Production store
 

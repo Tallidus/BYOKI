@@ -14,9 +14,10 @@ jobs:
           version: 10.15.1
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 20
           cache: pnpm
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - run: pnpm --filter @byoki/example build
       - run: pnpm test
       - run: pnpm pack:check
