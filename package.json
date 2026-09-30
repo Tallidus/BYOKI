@@ -1,0 +1,22 @@
+{
+  "name": "byoki",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.15.1",
+  "scripts": {
+    "build": "corepack pnpm -r --filter \"./packages/*\" run build",
+    "typecheck": "corepack pnpm -r --filter \"./packages/*\" --workspace-concurrency=1 run build && corepack pnpm --filter @byoki/example typecheck",
+    "lint": "eslint .",
+    "test": "corepack pnpm build && corepack pnpm -r --filter \"./packages/*\" --filter @byoki/example run test && vitest run",
+    "dev": "corepack pnpm build && corepack pnpm --filter @byoki/example dev",
+    "pack:check": "node scripts/verify-pack.mjs",
+    "publish:packages": "corepack pnpm build && corepack pnpm -r --filter \"./packages/*\" publish --access public --no-git-checks"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.36.0",
+    "eslint": "^9.36.0",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.44.0",
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "@byoki/react",
+  "version": "0.1.0",
+  "description": "Settings screen and typed host API client for BYOKI. Requires React 19.",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "files": ["dist"],
+  "sideEffects": false,
+  "publishConfig": { "access": "public" },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@byoki/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.0",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "jsdom": "^26.1.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

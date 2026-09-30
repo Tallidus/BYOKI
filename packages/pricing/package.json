@@ -1,0 +1,30 @@
+{
+  "name": "@byoki/pricing",
+  "version": "0.1.0",
+  "description": "Versioned price catalog and cost estimates for BYOKI.",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "files": ["dist"],
+  "publishConfig": { "access": "public" },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@byoki/core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

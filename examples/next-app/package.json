@@ -1,0 +1,28 @@
+{
+  "name": "@byoki/example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@byoki/core": "workspace:*",
+    "@byoki/pricing": "workspace:*",
+    "@byoki/providers": "workspace:*",
+    "@byoki/react": "workspace:*",
+    "@byoki/server": "workspace:*",
+    "next": "^15.5.4",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
