@@ -24,10 +24,39 @@ function u32(value) {
   return buffer;
 }
 
+/**
+ * DOS time and date. The date field cannot be zero: that is 1980-00-00, which
+ * unzip and Python reject. Dates before 1980 fall back to 1980-01-01.
+ */
+function dosStamp(date = new Date()) {
+  let year = date.getFullYear();
+  let month = date.getMonth() + 1;
+  let day = date.getDate();
+  let hours = date.getHours();
+  let minutes = date.getMinutes();
+  let seconds = Math.floor(date.getSeconds() / 2);
+  if (year < 1980 || month < 1 || day < 1) {
+    return { time: 0, date: (1 << 5) | 1 };
+  }
+  if (year > 2107) {
+    year = 2107;
+    month = 12;
+    day = 31;
+    hours = 23;
+    minutes = 59;
+    seconds = 29;
+  }
+  return {
+    time: (hours << 11) | (minutes << 5) | seconds,
+    date: ((year - 1980) << 9) | (month << 5) | day,
+  };
+}
+
 /** Zip archive using deflate. `files` is `{ name, data }` with POSIX paths. */
-export function createZip(files) {
+export function createZip(files, date = new Date()) {
   const locals = [];
   const centrals = [];
+  const stamp = dosStamp(date);
   let offset = 0;
   for (const file of files) {
     const name = Buffer.from(file.name.replaceAll("\\", "/"), "utf8");
@@ -39,8 +68,8 @@ export function createZip(files) {
       u16(20),
       u16(0),
       u16(8),
-      u16(0),
-      u16(0),
+      u16(stamp.time),
+      u16(stamp.date),
       u32(crc),
       u32(compressed.length),
       u32(raw.length),
@@ -55,8 +84,8 @@ export function createZip(files) {
       u16(20),
       u16(0),
       u16(8),
-      u16(0),
-      u16(0),
+      u16(stamp.time),
+      u16(stamp.date),
       u32(crc),
       u32(compressed.length),
       u32(raw.length),

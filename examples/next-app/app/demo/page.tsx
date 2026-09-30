@@ -27,7 +27,7 @@ export default async function DemoPage({ searchParams }: { searchParams: Promise
       <div className="section">
         <DemoApp
           csrfToken={session.csrf}
-          expiresLabel={new Date(session.exp).toISOString().replace(".000Z", "Z")}
+          expiresAt={session.exp}
           minutesLeft={minutesLeft}
           mockMode={isMockMode()}
           storeMode={storeMode()}

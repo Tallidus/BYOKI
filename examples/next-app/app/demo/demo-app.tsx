@@ -1,12 +1,31 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SettingsScreen } from "./settings-screen";
 import { TryForm } from "./try-form";
 
+function SessionExpiry({ expiresAt, minutesLeft }: { expiresAt: number; minutesLeft: number }) {
+  const [localTime, setLocalTime] = useState<string | null>(null);
+  useEffect(() => {
+    setLocalTime(
+      new Date(expiresAt).toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+    );
+  }, [expiresAt]);
+  return (
+    <>
+      in about {minutesLeft} min{localTime ? `, ${localTime} your time` : ""}
+    </>
+  );
+}
+
 export function DemoApp({
   csrfToken,
-  expiresLabel,
+  expiresAt,
   minutesLeft,
   mockMode,
   storeMode,
@@ -14,7 +33,7 @@ export function DemoApp({
   csrfError,
 }: {
   csrfToken: string;
-  expiresLabel: string;
+  expiresAt: number;
   minutesLeft: number;
   mockMode: boolean;
   storeMode: "memory" | "file";
@@ -22,6 +41,7 @@ export function DemoApp({
   csrfError: boolean;
 }) {
   const [settingsKey, setSettingsKey] = useState(0);
+  const [usageRevision, setUsageRevision] = useState(0);
   const [sampleMessage, setSampleMessage] = useState<string | null>(null);
   const [sampleError, setSampleError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -35,8 +55,8 @@ export function DemoApp({
       ) : null}
       <div className={mockMode ? "callout" : "banner"}>
         <p>
-          <strong>Session {sessionLabel}.</strong> This browser has its own id. It expires at {expiresLabel} (about{" "}
-          {minutesLeft} min). Ending the session deletes its keys.
+          <strong>Session {sessionLabel}.</strong> This browser has its own id. It expires{" "}
+          <SessionExpiry expiresAt={expiresAt} minutesLeft={minutesLeft} />. Ending the session deletes its keys.
         </p>
         {mockMode ? (
           <p>
@@ -108,7 +128,7 @@ export function DemoApp({
             </div>
           ) : null}
           <div className="embed">
-            <SettingsScreen key={settingsKey} csrfToken={csrfToken} />
+            <SettingsScreen key={settingsKey} csrfToken={csrfToken} refreshToken={usageRevision} />
           </div>
         </section>
         <div className="stack">
@@ -120,7 +140,7 @@ export function DemoApp({
                 <code className="inline">POST /api/ai/invoke</code> calls <code className="inline">router.forScope</code> with this session. The settings client never sends the prompt.
               </p>
             </div>
-            <TryForm csrfToken={csrfToken} />
+            <TryForm csrfToken={csrfToken} onRequested={() => setUsageRevision((value) => value + 1)} />
           </section>
           <section className="card">
             <h2>What the server did</h2>

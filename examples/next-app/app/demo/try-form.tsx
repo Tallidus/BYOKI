@@ -11,7 +11,7 @@ type InvokeData = {
   warning?: string;
 };
 
-export function TryForm({ csrfToken }: { csrfToken: string }) {
+export function TryForm({ csrfToken, onRequested }: { csrfToken: string; onRequested?: () => void }) {
   const [capability, setCapability] = useState("chat");
   const [text, setText] = useState("Summarize what this demo just did with my key.");
   const [image, setImage] = useState("");
@@ -44,6 +44,7 @@ export function TryForm({ csrfToken }: { csrfToken: string }) {
             setRaw(JSON.stringify(body, null, 2));
             if (!body.ok || !body.data) setError(body.error?.message ?? "The request failed.");
             else setOutput(body.data);
+            onRequested?.();
           })
           .catch(() => setError("The request failed."))
           .finally(() => setPending(false));
