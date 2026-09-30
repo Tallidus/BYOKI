@@ -8,7 +8,7 @@ Install the packages in a TypeScript host that already authenticates users:
 corepack pnpm add @byoki/core @byoki/server @byoki/providers @byoki/pricing @byoki/react
 ```
 
-That command works after the packages are published. Inside this repository, run `corepack pnpm install`, `corepack pnpm build`, then `corepack pnpm --filter @byoki/example dev`.
+That command works after the packages are published. Inside this repository, run `corepack pnpm install --frozen-lockfile`, `corepack pnpm build`, then `corepack pnpm --filter @byoki/example dev`. The public demo, generated API docs, and packed downloads are served from the example app at [https://byoki.eastonnielson.dev](https://byoki.eastonnielson.dev).
 
 ## Declare capabilities and start the server SDK
 
@@ -23,7 +23,7 @@ import { MANUAL_CATALOG, PROVIDER_LINKS, createProviderAdapters } from "@byoki/p
 import { createAIConnectionsApp } from "@byoki/server";
 
 const config = defineAIConnections({
-  appName: "Garage Assistant",
+  appName: "Your app",
   capabilities: {
     chat: {
       description: "Answers questions about vehicle repairs.",

@@ -23,6 +23,16 @@ A declared capability restricts SDK routing and the settings UI. It does not res
 - Connection tests and model discovery are rate limited.
 - Upstream error text is truncated and stripped of key-shaped strings before it is shown.
 
+## Public demo
+
+The site at `examples/next-app` is a showcase, not a production identity system.
+
+- Sessions are anonymous and per browser. There is no shared account.
+- The default credential store is process memory with the session expiry. Ending the session deletes that visitor's keys.
+- Mock mode is on unless `BYOKI_USE_MOCK=0`. In mock mode the adapter does not call a provider.
+- Request handlers do not log prompt bodies or API keys. Provider errors shown to the visitor pass through the redactor.
+- `BYOKI_STORE=file` is a local option. It still encrypts keys, and logout deletes those credential rows, but it persists data on disk. Do not use it for the public site.
+
 ## What remains the host's job
 
 - Authentication, CSRF secrets, TLS outside local development, and production secret storage.
