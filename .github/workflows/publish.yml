@@ -4,6 +4,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -11,18 +14,21 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 10.15.1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
-      - run: pnpm -r --filter "./packages/*" publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Trusted publishing: npm CLI (bundled with Node 24) exchanges this
+      # job's OIDC token. Do not set NODE_AUTH_TOKEN or NPM_TOKEN; a static
+      # token is used instead of the OIDC exchange. pnpm 10.15 packs each
+      # package (rewriting workspace: ranges) and runs npm publish.
+      # --provenance requires a public repo and a provenance attestation.
+      - run: pnpm -r --filter "./packages/*" publish --access public --no-git-checks --provenance

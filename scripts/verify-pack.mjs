@@ -56,6 +56,7 @@ writeFileSync(
       name: "byoki-consumer",
       private: true,
       type: "module",
+      packageManager: "pnpm@10.15.1",
       dependencies,
       pnpm: { overrides: dependencies },
     },
