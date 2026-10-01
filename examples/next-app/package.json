@@ -18,7 +18,7 @@
     "@byoki/providers": "workspace:*",
     "@byoki/react": "workspace:*",
     "@byoki/server": "workspace:*",
-    "next": "^15.5.4",
+    "next": "^16.3.8",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },

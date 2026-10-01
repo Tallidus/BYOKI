@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "description": "Capability routing, config validation, and provider interfaces for BYOKI.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tallidus/BYOKI.git",
+    "directory": "packages/core"
+  },
   "type": "module",
   "engines": { "node": ">=20" },
   "files": ["dist"],

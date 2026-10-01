@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "description": "Versioned price catalog and cost estimates for BYOKI.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tallidus/BYOKI.git",
+    "directory": "packages/pricing"
+  },
   "type": "module",
   "engines": { "node": ">=20" },
   "files": ["dist"],

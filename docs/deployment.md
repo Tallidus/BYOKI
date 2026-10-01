@@ -66,12 +66,17 @@ corepack pnpm pack:check
 
 ## Publishing
 
-The packages are versioned together at `0.1.0` and are licensed under MIT. They are not published until you run the publish command from a machine logged into the npm scope `@byoki`.
+The packages are versioned together at `0.1.0` and are licensed under MIT.
 
-Add a `repository` field to each package before the first public release if the git remote exists. Then:
+`.github/workflows/publish.yml` publishes `packages/*` when a GitHub release is published. It installs with `--frozen-lockfile`. `pnpm publish` rewrites `workspace:*` dependencies, then calls `npm publish`. The job requests `id-token: write` and does not use a long-lived npm token. npm trusted publishing exchanges the GitHub Actions OIDC token for a short-lived credential and, for this public repository, attaches a provenance attestation (`--provenance`).
 
-```bash
-corepack pnpm publish:packages
-```
+Each published package needs a trusted publisher on npmjs.com before that workflow can succeed. For `@byoki/core`, `@byoki/pricing`, `@byoki/providers`, `@byoki/react`, and `@byoki/server`, open the package settings (or the account trusted-publisher setup, if the package has never been published) and add GitHub Actions:
 
-`publish:packages` builds, then runs `pnpm publish` for `packages/*` with public access. It does not run as part of tests. The GitHub workflow `.github/workflows/publish.yml` does the same when a release is published and `NPM_TOKEN` is set. `pnpm publish` rewrites `workspace:*` dependencies to the published version.
+- Organization or user: `Tallidus`
+- Repository: `BYOKI`
+- Workflow filename: `publish.yml` (the filename only, not the `.github/workflows/` path)
+- Allow direct `npm publish`. Configurations created after 3 September 2026 start as staged publishing only, which this workflow does not use.
+
+After one release publishes through that trusted publisher, delete the `NPM_TOKEN` Actions secret. Token publishing is no longer used. For a stricter setting, each package can require two-factor authentication and disallow tokens; trusted publishers keep working.
+
+`corepack pnpm publish:packages` is the local equivalent. It still needs an npm login on that machine and is not part of CI.
