@@ -1,15 +1,18 @@
 import { getSession } from "../../../../lib/auth";
-import { getServices } from "../../../../lib/services";
+import { publicHost } from "../../../../lib/http";
+import { activateVisitor, getServices } from "../../../../lib/services";
+
+export const dynamic = "force-dynamic";
 
 async function handle(request: Request): Promise<Response> {
   const session = await getSession();
-  const url = new URL(request.url);
+  if (session) await activateVisitor(session, session.exp);
   return getServices().handlers.dispatch(request, {
     scope: session ? { tenantId: session.tenantId, userId: session.userId } : null,
     csrfHeader: request.headers.get("x-csrf-token"),
     expectedCsrf: session?.csrf ?? null,
     origin: request.headers.get("origin"),
-    host: url.host,
+    host: publicHost(request),
   });
 }
 

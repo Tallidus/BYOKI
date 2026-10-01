@@ -1,5 +1,7 @@
 # API reference
 
+The deployed docs render this reference from the package source: [https://byoki.eastonnielson.dev/docs#api](https://byoki.eastonnielson.dev/docs#api). Regenerate the JSON with `node scripts/generate-api-docs.mjs`.
+
 Browser code should import `@byoki/core/browser`. Server code imports `@byoki/core`, `@byoki/server`, `@byoki/providers`, and `@byoki/pricing`.
 
 ## Host routes
