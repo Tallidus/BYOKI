@@ -8,7 +8,7 @@ import {
   type UsageUnits,
 } from "@byoki/core";
 import { CATALOG_UPDATED_AT } from "./catalog.js";
-import { providerFetch, readError, type FetchLike } from "./http.js";
+import { failedConnectionTest, providerFetch, readError, type FetchLike } from "./http.js";
 
 const BASE = "https://api.anthropic.com/v1";
 const VERSION = "2023-06-01";
@@ -35,7 +35,7 @@ async function testKey(fetchImpl: FetchLike, key: string) {
     { method: "GET", headers: headers(key) },
     15_000,
   );
-  if (!response.ok) return { ok: false, reason: (await readError(response)).message };
+  if (!response.ok) return failedConnectionTest(response);
   return { ok: true };
 }
 

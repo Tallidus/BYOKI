@@ -4,7 +4,7 @@
 | --- | --- |
 | Policy | Core router tests reject a disallowed provider and an incompatible model. Changing the catalog invalidates a saved selection on the next call. |
 | Isolation | Server tests save a key as Alice and show that Bob cannot see or delete it. |
-| Secrets | The encrypted file and HTTP responses are asserted to omit the plaintext key. The logger redacts key-shaped strings. |
+| Secrets | The encrypted file and HTTP responses are asserted to omit the plaintext key. Provider test failures return a fixed message and are asserted to omit upstream text and key fragments. The logger drops any line that contains a key-shaped string, including a masked echo. |
 | Providers | Adapter tests mock HTTP for OpenAI, Anthropic, and Gemini request mapping, usage, timeout and rate-limit errors, and invalid keys. Live smoke tests are opt-in via `BYOKI_LIVE=1`. |
 | Usage | Successful, failed, streamed, and unknown-price calls write ledger rows. Prompts are not stored. Unknown cost is not shown as zero. |
 | Budgets | A concurrent pair of calls both pass a preflight, which is the documented best-effort behavior. |

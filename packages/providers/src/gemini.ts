@@ -7,7 +7,7 @@ import {
   type UsageUnits,
 } from "@byoki/core";
 import { CATALOG_UPDATED_AT } from "./catalog.js";
-import { providerFetch, readError, type FetchLike } from "./http.js";
+import { failedConnectionTest, providerFetch, readError, type FetchLike } from "./http.js";
 
 const BASE = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -28,7 +28,7 @@ function headers(key: string): Record<string, string> {
 
 async function testKey(fetchImpl: FetchLike, key: string) {
   const response = await providerFetch(fetchImpl, `${BASE}/models`, { method: "GET", headers: headers(key) }, 15_000);
-  if (!response.ok) return { ok: false, reason: (await readError(response)).message };
+  if (!response.ok) return failedConnectionTest(response);
   return { ok: true };
 }
 

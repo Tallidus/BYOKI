@@ -1,4 +1,4 @@
-import type { Capability, ProviderId, Selection } from "@byoki/core/browser";
+import type { Capability, ProviderId, Selection, UpstreamErrorCategory } from "@byoki/core/browser";
 
 export type ConnectionsView = {
   appName: string;
@@ -75,7 +75,10 @@ export type ConnectionsClient = {
   getConnections(): Promise<ConnectionsView>;
   putKey(provider: ProviderId, apiKey: string): Promise<void>;
   deleteKey(provider: ProviderId): Promise<void>;
-  testKey(provider: ProviderId, apiKey?: string): Promise<{ ok: boolean; reason?: string; testMaySpendQuota: boolean }>;
+  testKey(
+    provider: ProviderId,
+    apiKey?: string,
+  ): Promise<{ ok: boolean; reason?: string; category?: UpstreamErrorCategory; testMaySpendQuota: boolean }>;
   getModels(capability: Capability, discover?: boolean): Promise<{ models: ModelView[]; warnings: string[] }>;
   putSelection(capability: Capability, provider: ProviderId, modelId: string): Promise<void>;
   getUsage(from: string, to: string): Promise<UsageView>;

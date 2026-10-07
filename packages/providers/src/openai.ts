@@ -8,7 +8,7 @@ import {
   type UsageUnits,
 } from "@byoki/core";
 import { CATALOG_UPDATED_AT } from "./catalog.js";
-import { providerFetch, readError, type FetchLike } from "./http.js";
+import { failedConnectionTest, providerFetch, readError, type FetchLike } from "./http.js";
 
 const BASE = "https://api.openai.com/v1";
 
@@ -31,10 +31,7 @@ export function createOpenAIAdapter(fetchImpl: FetchLike = fetch): ProviderAdapt
 
 async function testKey(fetchImpl: FetchLike, key: string) {
   const response = await providerFetch(fetchImpl, `${BASE}/models`, { method: "GET", headers: auth(key) }, 15_000);
-  if (!response.ok) {
-    const error = await readError(response);
-    return { ok: false, reason: error.message };
-  }
+  if (!response.ok) return failedConnectionTest(response);
   return { ok: true };
 }
 

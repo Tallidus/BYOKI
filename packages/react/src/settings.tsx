@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import type { ProviderId } from "@byoki/core/browser";
+import { connectionTestMessage, scrubVisitorText, type ProviderId } from "@byoki/core/browser";
 import type { ConnectionsClient, ConnectionsView, ModelView, UsageView } from "./client.js";
 
 const NAMES: Record<ProviderId, string> = {
@@ -149,7 +149,8 @@ function ConnectionCard({
     try {
       await action();
     } catch (caught) {
-      setMessage(caught instanceof Error ? caught.message : "That action failed.");
+      const message = caught instanceof Error ? caught.message : "That action failed.";
+      setMessage(scrubVisitorText(message, "That action failed."));
     } finally {
       setBusy(false);
     }
@@ -181,7 +182,7 @@ function ConnectionCard({
             run(async () => {
               if (provider.testMaySpendQuota && !window.confirm(quotaNote)) return;
               const result = await client.testKey(provider.id, apiKey || undefined);
-              setMessage(result.ok ? "The key was accepted." : result.reason ?? "The key was rejected.");
+              setMessage(result.ok ? "The key was accepted." : connectionTestMessage(result) ?? "The key was rejected.");
             })
           }
         >

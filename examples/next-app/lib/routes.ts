@@ -17,7 +17,7 @@ export const HOST_ROUTES = [
   {
     method: "POST",
     path: "/api/ai/connections/:provider/test",
-    purpose: "Test a submitted or stored key. Rate limited.",
+    purpose: "Test a submitted or stored key. Rate limited. Failures return a fixed category message, not provider error text.",
   },
   {
     method: "GET",

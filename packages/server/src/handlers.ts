@@ -1,9 +1,13 @@
 import {
   AIConnectionsError,
   TRUST_NOTICES,
+  UPSTREAM_ERROR_MESSAGES,
+  connectionTestCategory,
+  connectionTestMessage,
   explainSelection,
   isCapability,
   isProviderId,
+  messageForVisitor,
   type AIConnectionsConfig,
   type Capability,
   type CredentialStore,
@@ -16,7 +20,6 @@ import {
   type UsageRecord,
 } from "@byoki/core";
 import type { Logger } from "./redact.js";
-import { redact } from "./redact.js";
 import type { RateLimiter } from "./rate-limit.js";
 
 export type ProviderLink = {
@@ -57,7 +60,7 @@ function json(status: number, body: unknown): Response {
 }
 
 function fail(error: AIConnectionsError, status = statusFor(error.code)): Response {
-  return json(status, { ok: false, error: { code: error.code, message: redact(error.message) } });
+  return json(status, { ok: false, error: { code: error.code, message: messageForVisitor(error) } });
 }
 
 function statusFor(code: AIConnectionsError["code"]): number {
@@ -246,11 +249,21 @@ export function createHandlers(deps: HandlerDeps) {
       throw new AIConnectionsError("CREDENTIAL_MISSING", "Save a key before testing, or submit one with the test.");
     }
     const result = await adapter.testConnection(key);
+    const reason = connectionTestMessage(result);
+    const category = connectionTestCategory(result);
+    if (!result.ok) {
+      deps.logger.error("credential.test", {
+        provider,
+        tenantId: scope.tenantId,
+        userId: scope.userId,
+        category: category ?? "unknown",
+      });
+    }
     return json(200, {
       ok: true,
       data: {
         ok: result.ok,
-        ...(result.reason ? { reason: redact(result.reason, [key]) } : {}),
+        ...(reason && category ? { reason, category } : {}),
         testMaySpendQuota: adapter.testMaySpendQuota,
       },
     });
@@ -295,8 +308,7 @@ export function createHandlers(deps: HandlerDeps) {
             }
           }
         } catch (error) {
-          const message = error instanceof Error ? redact(error.message, [key]) : "Model refresh failed.";
-          warnings.push(message);
+          warnings.push(error instanceof AIConnectionsError ? messageForVisitor(error) : "Model refresh failed.");
         }
       }
     }
@@ -404,7 +416,7 @@ export function createHandlers(deps: HandlerDeps) {
         return fail(error);
       }
       deps.logger.error("ai.request", { code: "UPSTREAM_UNAVAILABLE" });
-      return fail(new AIConnectionsError("UPSTREAM_UNAVAILABLE", "The request failed."));
+      return fail(new AIConnectionsError("UPSTREAM_UNAVAILABLE", UPSTREAM_ERROR_MESSAGES.unknown));
     }
   }
 

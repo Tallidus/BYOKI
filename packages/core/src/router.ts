@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { AIConnectionsError } from "./errors.js";
+import { AIConnectionsError, UPSTREAM_ERROR_MESSAGES } from "./errors.js";
 import { normalizeInput } from "./mock-adapter.js";
 import type {
   AIConnectionsConfig,
@@ -223,7 +223,7 @@ export function createRouter(deps: RouterDeps) {
       const mapped =
         error instanceof AIConnectionsError
           ? error
-          : new AIConnectionsError("UPSTREAM_UNAVAILABLE", "The provider request failed.");
+          : new AIConnectionsError("UPSTREAM_UNAVAILABLE", UPSTREAM_ERROR_MESSAGES.unknown);
       await record(deps.ledger, {
         id: randomUUID(),
         time: now().toISOString(),

@@ -1,5 +1,10 @@
-import { AIConnectionsError, isAIConnectionsError, type Capability } from "@byoki/core";
-import { redact } from "@byoki/server";
+import {
+  AIConnectionsError,
+  UPSTREAM_ERROR_MESSAGES,
+  isAIConnectionsError,
+  messageForVisitor,
+  type Capability,
+} from "@byoki/core";
 import { getSession } from "../../../../lib/auth";
 import { csrfRejected, jsonError, originRejected } from "../../../../lib/guard";
 import { activateVisitor, getServices } from "../../../../lib/services";
@@ -42,8 +47,8 @@ export async function POST(request: Request): Promise<Response> {
     }
     const mapped = isAIConnectionsError(error)
       ? error
-      : new AIConnectionsError("UPSTREAM_UNAVAILABLE", "The request failed.");
+      : new AIConnectionsError("UPSTREAM_UNAVAILABLE", UPSTREAM_ERROR_MESSAGES.unknown);
     const status = mapped.code === "CREDENTIAL_MISSING" || mapped.code === "MODEL_UNAVAILABLE" ? 404 : 400;
-    return jsonError(mapped.code, redact(mapped.message), status);
+    return jsonError(mapped.code, messageForVisitor(mapped), status);
   }
 }
