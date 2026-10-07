@@ -1,5 +1,6 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { UPSTREAM_ERROR_MESSAGES } from "@byoki/core/browser";
 import { AIConnectionsSettings } from "../src/settings.js";
 import type { ConnectionsClient, ConnectionsView, UsageView } from "../src/client.js";
 
@@ -66,6 +67,10 @@ function client(): ConnectionsClient {
   };
 }
 
+afterEach(() => {
+  cleanup();
+});
+
 describe("AIConnectionsSettings", () => {
   it("shows purpose, a password key field, and unknown cost", async () => {
     render(<AIConnectionsSettings client={client()} />);
@@ -74,6 +79,33 @@ describe("AIConnectionsSettings", () => {
     expect(screen.getByText(/A capability only controls routing/)).toBeTruthy();
     expect(screen.getByText(/Cost unavailable/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "Get a OpenAI key" })).toBeTruthy();
+  });
+
+  it("shows a fixed message for each key test failure and hides upstream text", async () => {
+    const leak =
+      "Incorrect API key provided: sk-test-*******-000. Full key sk-test-invalid-000 (invalid-000). x-request-id: req_test_leak_000";
+    const categories = ["invalid_key", "rate_limited", "unavailable", "unknown"] as const;
+    for (const category of categories) {
+      cleanup();
+      const api = client();
+      api.testKey = vi.fn(async () => ({ ok: false, category, reason: leak, testMaySpendQuota: false }));
+      const { container } = render(<AIConnectionsSettings client={api} />);
+      const card = within(container);
+      expect(await card.findByRole("heading", { name: "Garage Assistant" })).toBeTruthy();
+      fireEvent.change(card.getByLabelText("API key"), { target: { value: "sk-test-invalid-000" } });
+      fireEvent.click(card.getByRole("button", { name: "Test" }));
+      const message = await card.findByText(UPSTREAM_ERROR_MESSAGES[category]);
+      const shown = message.textContent ?? "";
+      expect(shown).toBe(UPSTREAM_ERROR_MESSAGES[category]);
+      expect(shown).not.toContain("sk-test-invalid-000");
+      expect(shown).not.toContain("invalid-000");
+      expect(shown).not.toContain("sk-test");
+      expect(shown).not.toContain("Incorrect API key");
+      expect(shown).not.toContain("req_test_leak_000");
+      expect(card.queryByText(/Incorrect API key/)).toBeNull();
+      expect(card.queryByText(/invalid-000/)).toBeNull();
+      expect(card.queryByText(/sk-test/)).toBeNull();
+    }
   });
 
   it("reloads usage when refreshToken changes", async () => {

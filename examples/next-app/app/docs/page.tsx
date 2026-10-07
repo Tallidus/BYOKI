@@ -185,7 +185,7 @@ corepack pnpm --filter @byoki/example dev`}
             <li>Records are scoped by tenant and user.</li>
             <li>Provider calls use fixed HTTPS endpoints. This release does not accept a caller-supplied provider URL.</li>
             <li>Connection tests and model discovery are rate limited.</li>
-            <li>Upstream error text is truncated and stripped of key-shaped strings before it is shown.</li>
+            <li>Upstream failures are shown as a fixed message for the failure category. Provider response text, request ids, and headers are not returned.</li>
           </ul>
           <h3>What this public demo adds</h3>
           <ul>
@@ -193,7 +193,7 @@ corepack pnpm --filter @byoki/example dev`}
             <li>The default store is process memory. Keys are deleted when the session expires, the visitor ends the session, or the process restarts.</li>
             <li>Mock mode is the default, including when <code className="inline">BYOKI_USE_MOCK</code> is unset, so the site can run with no provider credentials on the server.</li>
             <li>Redirects only honor <code className="inline">byoki.eastonnielson.dev</code>, localhost, and hosts you list in <code className="inline">BYOKI_PUBLIC_HOST</code> or <code className="inline">BYOKI_PUBLIC_ORIGIN</code>. A stray forwarded host cannot send the browser elsewhere.</li>
-            <li>The invoke route redacts error text and does not log the prompt or the key.</li>
+            <li>The invoke route returns a fixed message for provider failures and does not log the prompt or the key.</li>
           </ul>
           <p>Local deletion removes the key from this app. It does not revoke the key at the provider. Budget checks are best-effort and are not a guaranteed spending cap.</p>
         </section>

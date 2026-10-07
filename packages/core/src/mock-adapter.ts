@@ -1,4 +1,4 @@
-import { AIConnectionsError } from "./errors.js";
+import { AIConnectionsError, UPSTREAM_ERROR_MESSAGES } from "./errors.js";
 import type {
   Capability,
   ContentPart,
@@ -58,7 +58,7 @@ export function createMockAdapter(id: ProviderId, options: MockAdapterOptions = 
     testMaySpendQuota: false,
     async testConnection(key: string) {
       if (!key || key.startsWith("bad")) {
-        return { ok: false, reason: "The provider rejected this key." };
+        return { ok: false, reason: UPSTREAM_ERROR_MESSAGES.invalid_key, category: "invalid_key" };
       }
       return { ok: true };
     },

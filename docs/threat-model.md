@@ -21,7 +21,7 @@ A declared capability restricts SDK routing and the settings UI. It does not res
 - Records are scoped by tenant and user. One user cannot list, replace, or delete another user's key.
 - Provider calls use fixed HTTPS endpoints. The first release does not accept a caller-supplied provider URL.
 - Connection tests and model discovery are rate limited.
-- Upstream error text is truncated and stripped of key-shaped strings before it is shown.
+- Upstream failures are shown as a fixed message for the failure category (rejected key, rate limit or quota, unavailable or timeout, or an unknown error). Provider response text, masked key echoes, request ids, and headers are not returned to the browser.
 
 ## Public demo
 
@@ -30,7 +30,7 @@ The site at `examples/next-app` is a showcase, not a production identity system.
 - Sessions are anonymous and per browser. There is no shared account.
 - The default credential store is process memory with the session expiry. Ending the session deletes that visitor's keys.
 - Mock mode is on unless `BYOKI_USE_MOCK=0`. In mock mode the adapter does not call a provider.
-- Request handlers do not log prompt bodies or API keys. Provider errors shown to the visitor pass through the redactor.
+- Request handlers do not log prompt bodies, API keys, or upstream provider error text. A log line that does contain a key-shaped string, including a masked echo, is replaced entirely.
 - `BYOKI_STORE=file` is a local option. It still encrypts keys, and logout deletes those credential rows, but it persists data on disk. Do not use it for the public site.
 
 ## What remains the host's job

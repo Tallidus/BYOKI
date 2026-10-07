@@ -23,6 +23,10 @@ export const ERROR_CODES = [
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
+/** Visitor-facing buckets for an upstream provider failure. */
+export const UPSTREAM_ERROR_CATEGORIES = ["invalid_key", "rate_limited", "unavailable", "unknown"] as const;
+export type UpstreamErrorCategory = (typeof UPSTREAM_ERROR_CATEGORIES)[number];
+
 export type Scope = {
   tenantId: string;
   userId: string;
@@ -131,7 +135,12 @@ export interface ProviderAdapter {
   id: ProviderId;
   supportedCapabilities: readonly Capability[];
   testMaySpendQuota: boolean;
-  testConnection(key: string): Promise<{ ok: boolean; reason?: string }>;
+  testConnection(key: string): Promise<{
+    ok: boolean;
+    /** Fixed visitor text. Hosts must not replace this with provider response text. */
+    reason?: string;
+    category?: UpstreamErrorCategory;
+  }>;
   listModels(key: string): Promise<ModelOption[]>;
   invoke(request: ProviderRequest, key: string): Promise<ProviderResult>;
 }

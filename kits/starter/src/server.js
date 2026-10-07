@@ -102,9 +102,11 @@ const server = createServer(async (req, res) => {
     });
     res.writeHead(response.status, headers);
     res.end(payload);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "The starter request failed.";
-    send(res, 500, { ok: false, error: { code: "UPSTREAM_UNAVAILABLE", message } });
+  } catch {
+    send(res, 500, {
+      ok: false,
+      error: { code: "UPSTREAM_UNAVAILABLE", message: "The provider request failed. Try again." },
+    });
   }
 });
 

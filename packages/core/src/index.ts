@@ -1,4 +1,15 @@
-export { AIConnectionsError, isAIConnectionsError } from "./errors.js";
+export {
+  AIConnectionsError,
+  MODEL_UNAVAILABLE_MESSAGE,
+  UPSTREAM_ERROR_MESSAGES,
+  connectionTestCategory,
+  connectionTestMessage,
+  isAIConnectionsError,
+  isFixedUpstreamMessage,
+  isUpstreamErrorCategory,
+  messageForVisitor,
+  scrubVisitorText,
+} from "./errors.js";
 export { defineAIConnections, isCapability, isProviderId } from "./config.js";
 export type { AIConnectionsInput } from "./config.js";
 export { createMockAdapter, normalizeInput } from "./mock-adapter.js";
@@ -10,6 +21,7 @@ export {
   ERROR_CODES,
   PROVIDER_IDS,
   TRUST_NOTICES,
+  UPSTREAM_ERROR_CATEGORIES,
 } from "./types.js";
 export type {
   AIConnectionsConfig,
@@ -21,6 +33,7 @@ export type {
   CredentialStore,
   ErrorCode,
   InputMessage,
+  UpstreamErrorCategory,
   LedgerOutcome,
   ModelOption,
   ProviderAdapter,

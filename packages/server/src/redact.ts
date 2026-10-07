@@ -1,20 +1,22 @@
 const SECRET_PATTERNS = [
-  /sk-ant-[A-Za-z0-9_-]{8,}/g,
-  /sk-[A-Za-z0-9_-]{8,}/g,
-  /AIza[0-9A-Za-z\-_]{10,}/g,
+  /sk-ant-[A-Za-z0-9*_-]{4,}/i,
+  /sk-[A-Za-z0-9*_-]{4,}/i,
+  /AIza[0-9A-Za-z*_-]{4,}/i,
 ];
 
+/**
+ * Drop a string that contains a key, including a provider's masked echo
+ * (`sk-test-*******-000`). The whole value is replaced so the surrounding
+ * upstream sentence is not kept.
+ */
 export function redact(text: string, extraSecrets: string[] = []): string {
-  let out = text;
-  for (const secret of extraSecrets) {
-    if (secret.length >= 4) {
-      out = out.split(secret).join("[redacted]");
-    }
-  }
-  for (const pattern of SECRET_PATTERNS) {
-    out = out.replace(pattern, "[redacted]");
-  }
-  return out.slice(0, 300);
+  const tainted = extraSecrets.some((secret) => secret.length >= 4 && text.includes(secret)) || containsSecret(text);
+  if (tainted) return "[redacted]";
+  return text.slice(0, 300);
+}
+
+function containsSecret(text: string): boolean {
+  return SECRET_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 export type Logger = {

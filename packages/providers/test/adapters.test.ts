@@ -61,7 +61,10 @@ describe("provider adapters", () => {
     const denied = createOpenAIAdapter(
       mockFetch(() => ({ status: 401, body: { error: { message: "bad key sk-supersecretkeyvalue" } } })),
     );
-    await expect(denied.invoke(request, "sk-supersecretkeyvalue")).rejects.toMatchObject({ code: "INVALID_KEY" });
+    await expect(denied.invoke(request, "sk-supersecretkeyvalue")).rejects.toMatchObject({
+      code: "INVALID_KEY",
+      message: expect.not.stringContaining("sk-supersecretkeyvalue"),
+    });
     const limited = createOpenAIAdapter(mockFetch(() => ({ status: 429, body: { error: { message: "slow down" } } })));
     await expect(limited.invoke(request, "sk-test")).rejects.toBeInstanceOf(AIConnectionsError);
     await expect(limited.invoke(request, "sk-test")).rejects.toMatchObject({ code: "RATE_LIMITED" });
