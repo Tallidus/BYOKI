@@ -102,6 +102,9 @@ describe("provider adapters", () => {
     const body = JSON.parse(String(invokeCall?.init.body));
     expect(body.messages[0].content[1].type).toBe("image");
     expect((invokeCall?.init.headers as Record<string, string>)["x-api-key"]).toBe("sk-ant-test");
+    expect((invokeCall?.init.headers as Record<string, string>)["anthropic-dangerous-direct-browser-access"]).toBe(
+      "true",
+    );
     const down = createAnthropicAdapter(mockFetch(() => ({ status: 503, body: { error: { message: "unavailable" } } })));
     await expect(down.testConnection("sk-ant-test")).resolves.toMatchObject({ ok: false });
   });

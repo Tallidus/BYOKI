@@ -84,7 +84,7 @@ describe("AIConnectionsSettings", () => {
   it("shows a fixed message for each key test failure and hides upstream text", async () => {
     const leak =
       "Incorrect API key provided: sk-test-*******-000. Full key sk-test-invalid-000 (invalid-000). x-request-id: req_test_leak_000";
-    const categories = ["invalid_key", "rate_limited", "unavailable", "unknown"] as const;
+    const categories = ["invalid_key", "rate_limited", "quota", "unavailable", "unknown"] as const;
     for (const category of categories) {
       cleanup();
       const api = client();

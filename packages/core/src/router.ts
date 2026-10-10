@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { AIConnectionsError, UPSTREAM_ERROR_MESSAGES } from "./errors.js";
 import { normalizeInput } from "./mock-adapter.js";
 import type {
@@ -56,6 +55,14 @@ export type InvokeSuccess = {
 export type InvokeStreamEvent =
   | { type: "delta"; text: string }
   | { type: "done"; result: InvokeSuccess };
+
+function randomId(): string {
+  const cryptoApi = globalThis.crypto;
+  if (!cryptoApi?.randomUUID) {
+    throw new AIConnectionsError("INVALID_CONFIG", "This runtime cannot create a request id.");
+  }
+  return cryptoApi.randomUUID();
+}
 
 function monthRange(now: Date): { from: string; to: string } {
   const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -256,7 +263,7 @@ export function createRouter(deps: RouterDeps) {
     },
   ): Promise<void> {
     await record(deps.ledger, {
-      id: randomUUID(),
+      id: randomId(),
       time: now().toISOString(),
       tenantId: scope.tenantId,
       userId: scope.userId,
@@ -284,7 +291,7 @@ export function createRouter(deps: RouterDeps) {
     error: AIConnectionsError,
   ): Promise<void> {
     await record(deps.ledger, {
-      id: randomUUID(),
+      id: randomId(),
       time: now().toISOString(),
       tenantId: scope.tenantId,
       userId: scope.userId,

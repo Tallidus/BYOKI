@@ -24,7 +24,7 @@ export const ERROR_CODES = [
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
 /** Visitor-facing buckets for an upstream provider failure. */
-export const UPSTREAM_ERROR_CATEGORIES = ["invalid_key", "rate_limited", "unavailable", "unknown"] as const;
+export const UPSTREAM_ERROR_CATEGORIES = ["invalid_key", "rate_limited", "quota", "unavailable", "unknown"] as const;
 export type UpstreamErrorCategory = (typeof UPSTREAM_ERROR_CATEGORIES)[number];
 
 export type Scope = {

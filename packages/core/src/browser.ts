@@ -1,3 +1,5 @@
+export { createDirectClient, detectProvider } from "./direct.js";
+export type { DirectClient, DirectInvokeInput, DirectInvokeResult, DirectKeyTest, DirectStreamEvent } from "./direct.js";
 export {
   MODEL_UNAVAILABLE_MESSAGE,
   UPSTREAM_ERROR_MESSAGES,

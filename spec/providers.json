@@ -1,0 +1,63 @@
+{
+  "keyDetection": [
+    { "prefix": "sk-ant-", "provider": "anthropic" },
+    { "prefix": "sk-", "provider": "openai" },
+    { "prefix": "AIza", "provider": "gemini" }
+  ],
+  "limits": {
+    "maxMessages": 32,
+    "maxPartsPerMessage": 8,
+    "keyTestTimeoutMs": 15000,
+    "invokeTimeoutMs": 60000,
+    "imageMimeTypes": ["image/png", "image/jpeg", "image/webp", "image/gif"]
+  },
+  "storage": {
+    "key": "byoki.v1.key.{provider}",
+    "model": "byoki.v1.model.{provider}.{capability}",
+    "rules": [
+      "Store the key only in platform secure storage.",
+      "Never use the API key as the storage key name.",
+      "Never write the key to logs, analytics, crash reports, URLs, screenshots, localStorage, or SharedPreferences.",
+      "Model ids are not secrets.",
+      "After a successful save, clear the entry field and do not display the key again.",
+      "Deleting the local key does not revoke it at the provider."
+    ]
+  },
+  "providers": [
+    {
+      "id": "openai",
+      "test": { "method": "GET", "url": "https://api.openai.com/v1/models" },
+      "invoke": { "method": "POST", "url": "https://api.openai.com/v1/chat/completions" },
+      "stream": { "method": "POST", "url": "https://api.openai.com/v1/chat/completions" },
+      "authHeader": "authorization",
+      "authScheme": "Bearer",
+      "keyInUrl": false
+    },
+    {
+      "id": "anthropic",
+      "test": { "method": "GET", "url": "https://api.anthropic.com/v1/models?limit=1" },
+      "invoke": { "method": "POST", "url": "https://api.anthropic.com/v1/messages" },
+      "stream": { "method": "POST", "url": "https://api.anthropic.com/v1/messages" },
+      "authHeader": "x-api-key",
+      "extraHeaders": {
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      "keyInUrl": false
+    },
+    {
+      "id": "gemini",
+      "test": { "method": "GET", "url": "https://generativelanguage.googleapis.com/v1beta/models" },
+      "invoke": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+      },
+      "stream": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse"
+      },
+      "authHeader": "x-goog-api-key",
+      "keyInUrl": false
+    }
+  ]
+}

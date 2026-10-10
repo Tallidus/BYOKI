@@ -1,8 +1,157 @@
 # Integrating BYOKI from any application
 
-BYOKI is a Node 20 library. A browser, Flutter, desktop, or other backend cannot import the packages. Those clients talk to a small HTTP API that your application hosts. This document is the contract for that API. It is implemented by `handlers.dispatch` in `@byoki/server`, including `POST /api/ai/invoke`. A build that does not register that route cannot stream. The JavaScript call `router.forScope(scope).invoke(...)` still works and stays buffered. Token streaming is the HTTP API described here, and the same stream is available in-process as `router.forScope(scope).invokeStream(...)`.
+BYOKI takes a key the user already owns and calls that provider from the user's device. There is no BYOKI server, and the key is not sent to the application author. It goes only to OpenAI, Anthropic, or Gemini, over that provider's HTTPS API.
 
-There is no BYOKI-operated multi-tenant service. The published npm packages are libraries. You run the host.
+The language-neutral contract is [spec/SPEC.md](../spec/SPEC.md), with the catalog, endpoints, and error sentences in [spec/catalog.json](../spec/catalog.json), [spec/providers.json](../spec/providers.json), and [spec/errors.json](../spec/errors.json). Reference clients:
+
+- TypeScript, including a browser or Electron: `createOnDeviceClient` from `@byoki/providers`, or `createDirectClient` from `@byoki/core`.
+- Flutter and Dart: [`packages/byoki_dart`](../packages/byoki_dart).
+
+A Node host is still in this repository for an application that wants server-side routing. It is optional. It is not the primary model. See [Optional Node host](#optional-node-host).
+
+## Storage
+
+Save the key only in platform secure storage.
+
+| Platform | Where |
+| --- | --- |
+| iOS, macOS | Keychain (`flutter_secure_storage` on Flutter) |
+| Android | EncryptedSharedPreferences (`flutter_secure_storage`) |
+| Electron | `safeStorage` in the main process |
+| A web page | Memory for the session. A page has no OS keychain. Do not use `localStorage`. |
+
+Do not write the key to logs, analytics, crash reports, URLs, screenshots, `localStorage`, or `SharedPreferences`. Model ids are not secrets. After a successful save, clear the entry field and do not show the key again. Deleting the local copy does not revoke the key at the provider.
+
+Storage names used by the Dart package are `byoki.v1.key.<provider>` and `byoki.v1.model.<provider>.<capability>`. The API key is never the storage name.
+
+## Key detection
+
+Trim the key, then match prefixes in this order: `sk-ant-` is Anthropic, any other `sk-` (including `sk-proj-`) is OpenAI, `AIza` is Gemini. Anything else is unrecognized. Do not open a connection for an unrecognized key, and do not put the key in the error text.
+
+## TypeScript on the device
+
+`createOnDeviceClient` talks to the providers with `fetch`. It does not store the key and it does not need `@byoki/server`.
+
+```ts
+import { createOnDeviceClient } from "@byoki/providers";
+
+const byoki = createOnDeviceClient();
+const test = await byoki.testKey(apiKey);
+if (!test.ok) throw new Error(test.message);
+for await (const event of byoki.invokeStream({
+  apiKey,
+  modelId: "gpt-5.6-terra",
+  input: [{ role: "user", text: "Hello" }],
+})) {
+  if (event.type === "delta") append(event.text);
+}
+```
+
+`testKey` lists models at the provider. It does not generate text. `invoke` returns one result. `invokeStream` yields `{ type: "delta", text }` and then `{ type: "done", result }`. A failure before the first delta throws and yields nothing. A failure after a delta throws after those deltas. The thrown message is one of the fixed sentences in the spec. The result does not include provider metadata or request ids.
+
+Pass an image as raw base64, not a data URL:
+
+```ts
+input: [{
+  role: "user",
+  parts: [
+    { type: "text", text: "What is this?" },
+    { type: "image", mimeType: "image/jpeg", data: rawBase64 },
+  ],
+}]
+```
+
+`@byoki/core/browser` exports `createDirectClient` and `detectProvider` for a browser bundle. Pass your own adapters, or use `createOnDeviceClient` from `@byoki/providers` when the bundle can include that package. The core package no longer imports `node:crypto`.
+
+In Electron, call the provider from the main process when you can. The renderer is a browser, so the CORS notes below apply there.
+
+## Flutter
+
+Add the package from this repository. It is not published to pub.dev yet.
+
+```yaml
+dependencies:
+  byoki_dart:
+    git:
+      url: https://github.com/Tallidus/BYOKI.git
+      path: packages/byoki_dart
+      ref: cursor/http-invoke-contract-4083
+```
+
+After this change is on the default branch, use `ref: main` or omit `ref`.
+
+```dart
+import 'package:byoki_dart/byoki_dart.dart';
+
+final client = ByokiClient();
+final store = SecureByokiKeyStore();
+
+final test = await client.testKey(apiKey);
+if (!test.ok) return;
+await store.saveKey(test.provider!, apiKey);
+
+final key = await store.readKey(test.provider!);
+await for (final event in client.invokeStream(
+  apiKey: key!,
+  modelId: 'gpt-5.6-terra',
+  input: const [ByokiMessage(role: 'user', text: 'Hello')],
+)) {
+  switch (event) {
+    case ByokiDelta(:final text):
+      break;
+    case ByokiDone(:final result):
+      break;
+  }
+}
+```
+
+`client.models(provider: 'openai')` is the reviewed catalog. `ByokiPart.image(mimeType: 'image/jpeg', data: base64Encode(bytes))` sends a photo. `detectProvider` uses the prefixes above.
+
+Drop in the settings widget. With no arguments it uses `ByokiClient` and `SecureByokiKeyStore`:
+
+```dart
+const ByokiSettings()
+```
+
+The field is obscured. The widget names the provider as the user pastes, enables **Test and save** when the prefix matches and the trimmed value is at least 8 characters, tests the key, stores it, clears the field, and shows a model picker. **Remove key** deletes the device copy only.
+
+`ByokiSettings(capabilities: ['chat', 'vision'])` adds a picker per capability. Tests pass their own `client` and `store`.
+
+## Other languages
+
+Implement [spec/SPEC.md](../spec/SPEC.md) against the three HTTPS endpoints. Use the same prefix order, the same request mapping, the same SSE parsing, the same five error categories, and the same storage rules. Do not add a server to hold the key.
+
+## Browser CORS
+
+Probed on 2026-10-10 with `Origin: https://example.com`. Providers can change this.
+
+| Provider | What happened |
+| --- | --- |
+| OpenAI | `OPTIONS POST /v1/chat/completions` returned 200. `access-control-allow-origin` echoed the origin. Allowed headers included `authorization` and `content-type`. A browser call worked. |
+| Gemini | `OPTIONS GET /v1beta/models` returned 200. `access-control-allow-origin` echoed the origin. Allowed headers included `x-goog-api-key`. A browser call worked. |
+| Anthropic | `OPTIONS POST /v1/messages` without an extra header returned 400, body `Disallowed CORS origin`, and no `access-control-allow-origin`. The browser blocked the call. The same preflight returned 200 and `access-control-allow-origin: *` when `Access-Control-Request-Headers` included `anthropic-dangerous-direct-browser-access`. |
+
+The TypeScript adapters and the Dart client always send `anthropic-dangerous-direct-browser-access: true`, so a browser and a native app share one call. Flutter (`dart:io`), a Node process, and the Electron main process are not subject to CORS. The Electron renderer is.
+
+Do not work around a CORS failure by posting the key to an application server.
+
+## Errors
+
+| Category | Message |
+| --- | --- |
+| `invalid_key` | The provider rejected this key. Check the key and try again. |
+| `rate_limited` | The provider rate limit was reached. Wait and try again. |
+| `quota` | The provider quota or billing limit was reached. Check the provider account. |
+| `unavailable` | The provider is unavailable or the request timed out. Try again later. |
+| `unknown` | The provider request failed. Try again. |
+
+An empty field uses `Enter a provider API key.` A 429 whose provider code is `insufficient_quota` is `quota`, not `rate_limited`. The sentences above are the only provider text a user should see.
+
+## Optional Node host
+
+The packages `@byoki/server` and the routes under `/api/ai/*` still work. Use them only when the application, not the device, should hold the key and call the provider. The host is inside the trust boundary: it sees the key and the prompts. Say that to users.
+
+`handlers.dispatch` in `@byoki/server` implements this API, including `POST /api/ai/invoke`. `router.forScope(scope).invoke(...)` stays a buffered in-process call. `invokeStream` is the same stream in process. There is no BYOKI-operated multi-tenant service.
 
 ## What you host
 
@@ -249,7 +398,8 @@ Fixed provider sentences:
 | Category | Message |
 | --- | --- |
 | `invalid_key` | The provider rejected this key. Check the key and try again. |
-| `rate_limited` | The provider rate limit or quota was reached. Wait and try again. |
+| `rate_limited` | The provider rate limit was reached. Wait and try again. |
+| `quota` | The provider quota or billing limit was reached. Check the provider account. |
 | `unavailable` | The provider is unavailable or the request timed out. Try again later. |
 | `unknown` | The provider request failed. Try again. |
 
@@ -272,6 +422,8 @@ The client never sets those provider headers and never chooses the provider URL.
 
 ### Client storage
 
+These rules apply only when the device talks to the optional host above. An on-device client keeps the key in platform secure storage and never sends it to that host.
+
 - Send the provider key only to your host, in the `PUT` body, over HTTPS.
 - Use an obscured input. After HTTP 200, clear the field.
 - Do not put the key in a URL, analytics event, crash report, screenshot, or ordinary preferences.
@@ -279,9 +431,11 @@ The client never sets those provider headers and never chooses the provider URL.
 - Store the session bearer in the platform secret store. It is a different secret from the provider key.
 - Deleting a connection deletes the key from this app. It does not revoke it at the provider.
 
-## Dart / Flutter
+## Dart / Flutter against this host
 
-An app such as a vehicle log (maintenance, fuel, inspections, photos) hosts the Node process above and ships a Flutter client. The client does not depend on a Dart BYOKI package. It uses `package:http`.
+Prefer the on-device package at the top of this document. The sample below is only for an application that already chose the optional Node host. The client sends the provider key to that host, not directly to OpenAI, Anthropic, or Gemini.
+
+An app hosts the Node process above and ships a Flutter client. This sample uses `package:http`. It is not `package:byoki_dart`.
 
 Declare `chat` and `vision` in the host config if the product both answers questions and reads photos. That declaration lives in the Node host, not in a BYOKI change.
 
@@ -511,7 +665,7 @@ Keep the image bytes out of logs as well. The host forwards them to the selected
 
 ## Web, desktop, and other backends
 
-The same routes and JSON shapes apply.
+On-device clients use the specification at the top of this document. The notes below are for clients of the optional host. The same routes and JSON shapes apply.
 
 - A React web app can keep `@byoki/react` for the settings screen and call `POST /api/ai/invoke` from the host for prompts. See [integration.md](integration.md).
 - A desktop app uses the bearer flow above. Store the session in the OS keychain. Do not store the provider key after save.

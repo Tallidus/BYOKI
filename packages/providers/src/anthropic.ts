@@ -36,7 +36,12 @@ export function createAnthropicAdapter(fetchImpl: FetchLike = fetch): ProviderAd
 }
 
 function headers(key: string): Record<string, string> {
-  return { "x-api-key": key, "anthropic-version": VERSION };
+  return {
+    "x-api-key": key,
+    "anthropic-version": VERSION,
+    // Browsers are blocked unless this header is on the request. Native clients ignore it.
+    "anthropic-dangerous-direct-browser-access": "true",
+  };
 }
 
 async function testKey(fetchImpl: FetchLike, key: string) {

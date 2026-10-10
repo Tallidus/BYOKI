@@ -2,7 +2,7 @@
 
 The deployed docs render this reference from the package source: [https://byoki.eastonnielson.dev/docs#api](https://byoki.eastonnielson.dev/docs#api). Regenerate the JSON with `node scripts/generate-api-docs.mjs`.
 
-Browser code should import `@byoki/core/browser`. Server code imports `@byoki/core`, `@byoki/server`, `@byoki/providers`, and `@byoki/pricing`.
+On-device clients call the provider directly. That contract is [INTEGRATING.md](INTEGRATING.md). Browser code that still uses the optional host should import `@byoki/core/browser`. Server code imports `@byoki/core`, `@byoki/server`, `@byoki/providers`, and `@byoki/pricing`. `createOnDeviceClient` from `@byoki/providers` needs no server.
 
 ## Host routes
 
@@ -11,7 +11,7 @@ Browser code should import `@byoki/core/browser`. Server code imports `@byoki/co
 | GET | `/api/ai/connections` | Allowed providers, connection status, purposes, links, and selections. No secrets. |
 | PUT | `/api/ai/connections/:provider` | Create or replace a key for the signed-in user. Body: `{ "apiKey": "..." }`. |
 | DELETE | `/api/ai/connections/:provider` | Delete the stored connection for this app. |
-| POST | `/api/ai/connections/:provider/test` | Test a submitted or stored key. Rate limited. A failed test returns a fixed `reason` and `category` (`invalid_key`, `rate_limited`, `unavailable`, or `unknown`). The body does not include provider error text. |
+| POST | `/api/ai/connections/:provider/test` | Test a submitted or stored key. Rate limited. A failed test returns a fixed `reason` and `category` (`invalid_key`, `rate_limited`, `quota`, `unavailable`, or `unknown`). The body does not include provider error text. |
 | GET | `/api/ai/models?capability=chat` | Allowed compatible models. Add `discover=1` to refresh from the provider. |
 | PUT | `/api/ai/selections/:capability` | Save an allowed provider and model. Body: `{ "provider": "openai", "modelId": "..." }`. |
 | GET | `/api/ai/usage?from=...&to=...` | Observed ledger summary for the signed-in user. |

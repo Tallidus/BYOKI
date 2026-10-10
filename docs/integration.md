@@ -1,6 +1,6 @@
 # Integration guide
 
-BYOKI is an ESM package set for Node 20 or newer. `@byoki/react` requires React 19. There is no CommonJS build. Non-JavaScript clients use the HTTP API in [INTEGRATING.md](INTEGRATING.md), including `POST /api/ai/invoke` with `stream: true`. `router.invoke` stays a single buffered result. A model without a reviewed price entry shows “Cost unavailable,” not zero.
+The primary BYOKI integration calls the provider from the user's device. Web, Flutter, and other clients follow [INTEGRATING.md](INTEGRATING.md) and [spec/SPEC.md](../spec/SPEC.md). This page is the optional Node host: an ESM package set for Node 20 or newer. `@byoki/react` requires React 19. There is no CommonJS build. `router.invoke` stays a single buffered result. A model without a reviewed price entry shows “Cost unavailable,” not zero.
 
 Install the packages in a TypeScript host that already authenticates users:
 

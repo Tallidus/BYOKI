@@ -14,6 +14,15 @@ export { defineAIConnections, isCapability, isProviderId } from "./config.js";
 export type { AIConnectionsInput } from "./config.js";
 export { createMockAdapter, normalizeInput } from "./mock-adapter.js";
 export { createRouter, explainSelection, findCatalogModel } from "./router.js";
+export {
+  DEFAULT_INVOKE_TIMEOUT_MS,
+  KEY_TEST_TIMEOUT_MS,
+  MAX_DIRECT_MESSAGES,
+  MAX_DIRECT_PARTS,
+  createDirectClient,
+  detectProvider,
+} from "./direct.js";
+export type { DirectClient, DirectInvokeInput, DirectInvokeResult, DirectKeyTest, DirectStreamEvent } from "./direct.js";
 export type { AIRouter, InvokeBody, InvokeStreamEvent, InvokeSuccess, RouterDeps } from "./router.js";
 export {
   AVAILABILITY_CAVEAT,

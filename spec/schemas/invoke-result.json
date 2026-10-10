@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Tallidus/BYOKI/blob/main/spec/schemas/invoke-result.json",
+  "title": "On-device invoke result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["outputText", "provider", "modelId"],
+  "properties": {
+    "outputText": { "type": "string" },
+    "provider": { "enum": ["openai", "anthropic", "gemini"] },
+    "modelId": { "type": "string" },
+    "usage": { "$ref": "#/$defs/usage" }
+  },
+  "$defs": {
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "inputTokens": { "type": "integer", "minimum": 0 },
+        "outputTokens": { "type": "integer", "minimum": 0 },
+        "cacheReadTokens": { "type": "integer", "minimum": 0 },
+        "cacheWriteTokens": { "type": "integer", "minimum": 0 },
+        "imageCount": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Tallidus/BYOKI/blob/main/spec/schemas/stream-event.json",
+  "title": "On-device stream event",
+  "description": "Zero or more delta events, then one done event. A failure throws instead of emitting done. Deltas already emitted stay emitted.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "text"],
+      "properties": {
+        "type": { "const": "delta" },
+        "text": { "type": "string" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "result"],
+      "properties": {
+        "type": { "const": "done" },
+        "result": { "$ref": "invoke-result.json" }
+      }
+    }
+  ]
+}

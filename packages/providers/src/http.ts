@@ -25,12 +25,12 @@ const KEY_SIGNALS = new Set([
 
 const QUOTA_SIGNALS = new Set([
   "insufficient_quota",
-  "rate_limit_exceeded",
-  "rate_limit_error",
-  "resource_exhausted",
   "billing_hard_limit_reached",
   "quota_exceeded",
+  "resource_exhausted",
 ]);
+
+const RATE_SIGNALS = new Set(["rate_limit_exceeded", "rate_limit_error"]);
 
 const UNAVAILABLE_SIGNALS = new Set([
   "overloaded_error",
@@ -73,7 +73,10 @@ export function classifyUpstream(status: number, body: string): UpstreamFailure 
   if (status === 401 || status === 403 || has(KEY_SIGNALS)) {
     return failure("INVALID_KEY", "invalid_key");
   }
-  if (status === 429 || status === 402 || has(QUOTA_SIGNALS)) {
+  if (has(QUOTA_SIGNALS) || status === 402) {
+    return failure("RATE_LIMITED", "quota");
+  }
+  if (status === 429 || has(RATE_SIGNALS)) {
     return failure("RATE_LIMITED", "rate_limited");
   }
   if (status === 408 || status >= 500 || has(UNAVAILABLE_SIGNALS)) {
@@ -97,7 +100,7 @@ export async function readUpstreamFailure(response: Response): Promise<UpstreamF
 export async function readError(response: Response): Promise<AIConnectionsError> {
   const failure = await readUpstreamFailure(response);
   const requestId = response.headers.get("x-request-id") ?? response.headers.get("request-id") ?? undefined;
-  return new AIConnectionsError(failure.code, failure.message, requestId);
+  return new AIConnectionsError(failure.code, failure.message, requestId, failure.category);
 }
 
 /** Visitor-facing test result. A key test never surfaces model-missing copy or provider text. */
@@ -195,7 +198,7 @@ export function throwProviderEventError(record: Record<string, unknown>): void {
   const error = record.error;
   if (!error || typeof error !== "object") return;
   const failure = classifyUpstream(0, JSON.stringify({ error }));
-  throw new AIConnectionsError(failure.code, failure.message);
+  throw new AIConnectionsError(failure.code, failure.message, undefined, failure.category);
 }
 
 /**

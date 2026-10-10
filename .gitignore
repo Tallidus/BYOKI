@@ -1,4 +1,8 @@
 node_modules/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+packages/byoki_dart/pubspec.lock
 dist/
 .next/
 .data/
