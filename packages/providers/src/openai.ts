@@ -5,10 +5,20 @@ import {
   type ProviderAdapter,
   type ProviderRequest,
   type ProviderResult,
+  type ProviderStreamEvent,
   type UsageUnits,
 } from "@byoki/core";
 import { CATALOG_UPDATED_AT } from "./catalog.js";
-import { failedConnectionTest, providerFetch, readError, type FetchLike } from "./http.js";
+import {
+  failedConnectionTest,
+  providerFetch,
+  providerStream,
+  readError,
+  readJsonRecord,
+  readSse,
+  throwProviderEventError,
+  type FetchLike,
+} from "./http.js";
 
 const BASE = "https://api.openai.com/v1";
 
@@ -26,6 +36,7 @@ export function createOpenAIAdapter(fetchImpl: FetchLike = fetch): ProviderAdapt
     testConnection: (key) => testKey(fetchImpl, key),
     listModels: (key) => listModels(fetchImpl, key),
     invoke: (request, key) => invoke(fetchImpl, request, key),
+    invokeStream: (request, key) => invokeStream(fetchImpl, request, key),
   };
 }
 
@@ -44,6 +55,22 @@ async function listModels(fetchImpl: FetchLike, key: string): Promise<ModelOptio
     .map((item) => discovered(item.id!, ["chat"]));
 }
 
+function chatBody(request: ProviderRequest, stream: boolean): string {
+  return JSON.stringify({
+    model: request.modelId,
+    messages: request.input.map((message) => ({
+      role: message.role,
+      content: message.parts.map((part) =>
+        part.type === "text"
+          ? { type: "text", text: part.text }
+          : { type: "image_url", image_url: { url: `data:${part.mimeType};base64,${part.data}` } },
+      ),
+    })),
+    ...(request.maxOutputTokens !== undefined ? { max_completion_tokens: request.maxOutputTokens } : {}),
+    ...(stream ? { stream: true, stream_options: { include_usage: true } } : {}),
+  });
+}
+
 async function invoke(fetchImpl: FetchLike, request: ProviderRequest, key: string): Promise<ProviderResult> {
   const started = Date.now();
   const response = await providerFetch(
@@ -52,18 +79,7 @@ async function invoke(fetchImpl: FetchLike, request: ProviderRequest, key: strin
     {
       method: "POST",
       headers: { ...auth(key), "content-type": "application/json" },
-      body: JSON.stringify({
-        model: request.modelId,
-        messages: request.input.map((message) => ({
-          role: message.role,
-          content: message.parts.map((part) =>
-            part.type === "text"
-              ? { type: "text", text: part.text }
-              : { type: "image_url", image_url: { url: `data:${part.mimeType};base64,${part.data}` } },
-          ),
-        })),
-        ...(request.maxOutputTokens !== undefined ? { max_completion_tokens: request.maxOutputTokens } : {}),
-      }),
+      body: chatBody(request, false),
     },
     request.timeoutMs,
   );
@@ -83,6 +99,59 @@ async function invoke(fetchImpl: FetchLike, request: ProviderRequest, key: strin
     usageGaps: usage.gaps,
     metadata: { openai: { endpoint: "chat.completions" } },
   };
+}
+
+async function* invokeStream(
+  fetchImpl: FetchLike,
+  request: ProviderRequest,
+  key: string,
+): AsyncGenerator<ProviderStreamEvent> {
+  const started = Date.now();
+  const pending = await providerStream(
+    fetchImpl,
+    `${BASE}/chat/completions`,
+    {
+      method: "POST",
+      headers: { ...auth(key), "content-type": "application/json" },
+      body: chatBody(request, true),
+    },
+    request.timeoutMs,
+  );
+  try {
+    if (!pending.response.ok) throw await readError(pending.response);
+    let text = "";
+    let id: string | undefined;
+    let usage: OpenAIUsage | undefined;
+    for await (const event of readSse(pending.response)) {
+      if (event.data === "[DONE]") break;
+      const record = readJsonRecord(event.data);
+      throwProviderEventError(record);
+      if (typeof record.id === "string") id = record.id;
+      const choices = record.choices;
+      const first = Array.isArray(choices) ? choices[0] : undefined;
+      const delta =
+        first && typeof first === "object" && "delta" in first && first.delta && typeof first.delta === "object"
+          ? (first.delta as { content?: unknown }).content
+          : undefined;
+      if (typeof delta === "string" && delta.length > 0) {
+        text += delta;
+        yield { type: "delta", text: delta };
+      }
+      if (record.usage && typeof record.usage === "object") usage = record.usage as OpenAIUsage;
+    }
+    const mapped = mapUsage(usage);
+    yield {
+      type: "done",
+      output: [{ type: "text", text }],
+      ...(id ? { providerRequestId: id } : {}),
+      latencyMs: Date.now() - started,
+      ...(mapped.usage ? { usage: mapped.usage } : {}),
+      usageGaps: mapped.gaps,
+      metadata: { openai: { endpoint: "chat.completions", stream: true } },
+    };
+  } finally {
+    pending.release();
+  }
 }
 
 function mapUsage(usage: OpenAIUsage | undefined): { usage?: UsageUnits; gaps: string[] } {

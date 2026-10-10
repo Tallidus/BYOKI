@@ -15,10 +15,11 @@ Browser code should import `@byoki/core/browser`. Server code imports `@byoki/co
 | GET | `/api/ai/models?capability=chat` | Allowed compatible models. Add `discover=1` to refresh from the provider. |
 | PUT | `/api/ai/selections/:capability` | Save an allowed provider and model. Body: `{ "provider": "openai", "modelId": "..." }`. |
 | GET | `/api/ai/usage?from=...&to=...` | Observed ledger summary for the signed-in user. |
+| POST | `/api/ai/invoke` | Send a chat or vision prompt. Omit `stream` for JSON. `stream: true` responds with `text/event-stream`. |
 
-The example also exposes `POST /api/ai/invoke` so the sample can send a chat or vision request. That route belongs to the host, not the settings client.
+The settings client does not send prompts. Request and response shapes, bearer auth, SSE frames, and a Dart client are in [INTEGRATING.md](INTEGRATING.md).
 
-Mutating routes require the session cookie and an `x-csrf-token` header that matches the session. Error bodies use `{ ok: false, error: { code, message } }`.
+Cookie sessions require the session cookie and an `x-csrf-token` header that matches the session. A host that has already validated `Authorization: Bearer` sets `AuthContext.transport` to `"bearer"` and does not require CSRF. Error bodies use `{ ok: false, error: { code, message } }`. Failures before the first streamed token use that JSON body. Failures after the first token are an `error` event on the stream.
 
 Stable codes include `INVALID_CONFIG`, `PROVIDER_NOT_ALLOWED`, `CAPABILITY_UNSUPPORTED`, `MODEL_INCOMPATIBLE`, `MODEL_UNAVAILABLE`, `CREDENTIAL_MISSING`, `INVALID_KEY`, `RATE_LIMITED`, `UPSTREAM_UNAVAILABLE`, `BUDGET_BLOCKED`, `PAYLOAD_TOO_LARGE`, `UNAUTHENTICATED`, and `CSRF_FAILED`.
 

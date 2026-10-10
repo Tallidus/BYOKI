@@ -33,6 +33,12 @@ The site at `examples/next-app` is a showcase, not a production identity system.
 - Request handlers do not log prompt bodies, API keys, or upstream provider error text. A log line that does contain a key-shaped string, including a masked echo, is replaced entirely.
 - `BYOKI_STORE=file` is a local option. It still encrypts keys, and logout deletes those credential rows, but it persists data on disk. Do not use it for the public site.
 
+## Non-browser clients
+
+Flutter, desktop, and other backends call the same routes. The host authenticates them with its own session. When that session is an `Authorization: Bearer` token, the host sets `AuthContext.transport` to `"bearer"` and does not apply cookie CSRF. The bearer token is not a provider key.
+
+The client sends the provider key only to this host, in the `PUT` body, over HTTPS. After the host accepts it, the client should drop the key from memory and should not write it to ordinary preferences, logs, or crash reports. The host then sends the key only to the selected provider. Read APIs and the usage ledger do not return it. Local deletion still does not revoke the key at the provider.
+
 ## What remains the host's job
 
 - Authentication, CSRF secrets, TLS outside local development, and production secret storage.

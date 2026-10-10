@@ -34,6 +34,11 @@ export const HOST_ROUTES = [
     path: "/api/ai/usage?from=...&to=...",
     purpose: "Observed ledger summary for the signed-in user.",
   },
+  {
+    method: "POST",
+    path: "/api/ai/invoke",
+    purpose: "Send a chat or vision prompt. Omit stream for JSON. stream true uses text/event-stream.",
+  },
 ] as const;
 
 export const ERROR_CODES = [

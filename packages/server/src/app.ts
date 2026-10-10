@@ -52,17 +52,20 @@ export function createAIConnectionsApp(options: AIConnectionsAppOptions) {
     ledger: stores.ledger,
     catalog: options.catalog,
   };
+  const router = createRouter({
+    ...shared,
+    estimateCost: options.estimateCost,
+  });
   return {
     config: options.config,
-    router: createRouter({
-      ...shared,
-      estimateCost: options.estimateCost,
-    }),
+    router,
     handlers: createHandlers({
       ...shared,
       links: options.links,
       rateLimit: createRateLimiter(20, 60_000),
       logger,
+      invoke: (scope, body) => router.forScope(scope).invoke(body),
+      invokeStream: (scope, body) => router.forScope(scope).invokeStream(body),
     }),
   };
 }

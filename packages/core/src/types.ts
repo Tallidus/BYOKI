@@ -85,6 +85,19 @@ export type ProviderResult = {
   metadata?: Record<string, unknown>;
 };
 
+/** One chunk from a provider streaming call. `done` carries the same fields as a buffered result. */
+export type ProviderStreamEvent =
+  | { type: "delta"; text: string }
+  | {
+      type: "done";
+      output: ContentPart[];
+      providerRequestId?: string;
+      latencyMs: number;
+      usage?: UsageUnits;
+      usageGaps: string[];
+      metadata?: Record<string, unknown>;
+    };
+
 export type CostEstimate = {
   status: "known" | "unknown";
   currency: "USD";
@@ -143,6 +156,13 @@ export interface ProviderAdapter {
   }>;
   listModels(key: string): Promise<ModelOption[]>;
   invoke(request: ProviderRequest, key: string): Promise<ProviderResult>;
+  /**
+   * Optional token stream. Hosts that do not implement this still work:
+   * the router emits one delta from `invoke` and then a done event.
+   * The iterable must throw before the first yield when the provider rejects
+   * the call, and must not include the API key in any event.
+   */
+  invokeStream?(request: ProviderRequest, key: string): AsyncIterable<ProviderStreamEvent>;
 }
 
 export type CapabilityPolicy = {

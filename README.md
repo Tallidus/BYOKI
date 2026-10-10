@@ -8,6 +8,7 @@ The live demo, docs, and downloads are at [https://byoki.eastonnielson.dev](http
 - [Live demo](https://byoki.eastonnielson.dev/demo)
 - [Downloads](https://byoki.eastonnielson.dev/downloads)
 - [Integration guide](docs/integration.md)
+- [HTTP contract for any client, including Flutter](docs/INTEGRATING.md)
 - [API reference](docs/api.md)
 - [Deployment](docs/deployment.md)
 - [Threat model](docs/threat-model.md)
