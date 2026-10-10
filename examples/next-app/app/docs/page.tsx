@@ -108,7 +108,7 @@ corepack pnpm --filter @byoki/example dev`}
           <h2>API reference</h2>
           <p>Browser code imports <code className="inline">@byoki/core/browser</code>. Server code imports the other entry points. Signatures below are taken from the TypeScript source of each public export.</p>
           <h3>Host routes</h3>
-          <p>Forward <code className="inline">/api/ai/*</code> to <code className="inline">handlers.dispatch</code> with the session scope. The example also exposes <code className="inline">POST /api/ai/invoke</code>, which is a host route, not part of the settings client.</p>
+          <p>Forward <code className="inline">/api/ai/*</code> to <code className="inline">handlers.dispatch</code> with the session scope. That includes <code className="inline">POST /api/ai/invoke</code>. The settings client does not send prompts. Non-JavaScript clients use the same routes; see <code className="inline">docs/INTEGRATING.md</code>.</p>
           <div className="table-wrap">
             <table>
               <thead>
@@ -131,7 +131,7 @@ corepack pnpm --filter @byoki/example dev`}
               </tbody>
             </table>
           </div>
-          <p>Mutating routes need the session cookie and a matching CSRF token. Error bodies use <code className="inline">{`{ ok: false, error: { code, message } }`}</code>.</p>
+          <p>Cookie sessions need the session cookie and a matching CSRF token. A native client uses <code className="inline">Authorization: Bearer</code> instead. Error bodies use <code className="inline">{`{ ok: false, error: { code, message } }`}</code>.</p>
           <p>
             Stable codes:{" "}
             {ERROR_CODES.map((code, index) => (
@@ -203,7 +203,7 @@ corepack pnpm --filter @byoki/example dev`}
           <p>Implement <code className="inline">CredentialStore</code> with a secrets manager or envelope encryption whose data keys live outside the app. The type <code className="inline">ProductionCredentialStore</code> marks that implementation. Pass <code className="inline">credentials</code>, <code className="inline">selections</code>, and <code className="inline">ledger</code> into <code className="inline">createAIConnectionsApp</code>. <code className="inline">assertProductionStore</code> checks the <code className="inline">kind</code> field.</p>
           <p>Do not ship the development file store, and do not use this demo’s anonymous sessions, as production auth. Scope every secret by the tenant and user your auth system resolved. Keep plaintext keys in memory only for the provider call that needs them.</p>
           <p>Serve the host over HTTPS. Keep the master key or the secrets-manager credentials in the platform secret store. Avoid screenshots, traces, and analytics that include the key field.</p>
-          <p>A model without a reviewed price entry shows “Cost unavailable”, not zero. Real provider streaming is not part of 0.1. The mock adapter can record a streamed ledger row so the shape is covered.</p>
+          <p>A model without a reviewed price entry shows “Cost unavailable”, not zero. <code className="inline">POST /api/ai/invoke</code> with <code className="inline">stream: true</code> responds with server-sent events. <code className="inline">router.invoke</code> still returns one buffered result.</p>
         </section>
 
         <section id="frameworks">
@@ -211,7 +211,7 @@ corepack pnpm --filter @byoki/example dev`}
           <h3>Next.js App Router</h3>
           <p>The demo app mounts the handlers on a catch-all route. Compare <code className="inline">origin</code> to the public host when you are behind nginx or a Cloudflare tunnel, not to the internal bind address.</p>
           <CodeBlock code={NEXT_ROUTE_SNIPPET} label="app/api/ai/[[...path]]/route.ts" />
-          <p>Call <code className="inline">router.forScope</code> from your own feature route, the way <code className="inline">POST /api/ai/invoke</code> does. Set the cookie <code className="inline">Secure</code> flag from <code className="inline">X-Forwarded-Proto</code> when TLS terminates at the proxy.</p>
+          <p>The catch-all forwards <code className="inline">POST /api/ai/invoke</code> to <code className="inline">handlers.dispatch</code>. In-process code can still call <code className="inline">router.forScope</code>. Set the cookie <code className="inline">Secure</code> flag from <code className="inline">X-Forwarded-Proto</code> when TLS terminates at the proxy. Native clients use <code className="inline">Authorization: Bearer</code> and <code className="inline">transport: &quot;bearer&quot;</code>.</p>
           <h3>Node HTTP</h3>
           <p>
             The starter zip on the downloads page is a <code className="inline">node:http</code> server that binds to <code className="inline">127.0.0.1:8787</code> and forwards <code className="inline">/api/ai/*</code> to <code className="inline">handlers.dispatch</code>. It uses the development file store so you can see <code className="inline">BYOKI_MASTER_KEY</code>. Replace its fixed local user before you expose it.

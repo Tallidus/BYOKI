@@ -10,7 +10,12 @@ import {
   messageForVisitor,
   type AIConnectionsConfig,
   type Capability,
+  type ContentPart,
   type CredentialStore,
+  type InputMessage,
+  type InvokeBody,
+  type InvokeStreamEvent,
+  type InvokeSuccess,
   type ModelOption,
   type ProviderAdapter,
   type ProviderId,
@@ -40,7 +45,15 @@ export type HandlerDeps = {
   rateLimit: RateLimiter;
   logger: Logger;
   maxBodyBytes?: number;
+  /** Byte cap for `POST /invoke`. Defaults to 1 MiB. Key routes stay on `maxBodyBytes`. */
+  maxInvokeBodyBytes?: number;
+  /** Buffered prompt call. Omit to leave `POST /invoke` disabled. */
+  invoke?: (scope: Scope, body: InvokeBody) => Promise<InvokeSuccess>;
+  /** Token stream used when the invoke body sets `stream: true`. */
+  invokeStream?: (scope: Scope, body: InvokeBody) => AsyncIterable<InvokeStreamEvent>;
 };
+
+export type AuthTransport = "cookie" | "bearer";
 
 export type AuthContext = {
   scope: Scope | null;
@@ -48,9 +61,22 @@ export type AuthContext = {
   expectedCsrf: string | null;
   origin: string | null;
   host: string | null;
+  /**
+   * `cookie` (default) requires a matching `x-csrf-token` on mutations, and
+   * rejects a cross-origin `Origin` when both Origin and Host are present.
+   * `bearer` skips those checks. Set it only after the host has authenticated
+   * an `Authorization: Bearer` credential. Do not set it for a cookie session:
+   * browsers attach cookies on their own, so skipping CSRF would allow a
+   * cross-site request to use the session.
+   */
+  transport?: AuthTransport;
 };
 
 const KEY_BODY_LIMIT = 8_192;
+const INVOKE_BODY_LIMIT = 1_048_576;
+const MAX_MESSAGES = 32;
+const MAX_PARTS = 8;
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -110,7 +136,7 @@ function requireUser(auth: AuthContext, mutating: boolean): Scope {
   if (!auth.scope) {
     throw new AIConnectionsError("UNAUTHENTICATED", "Sign in to manage AI connections.");
   }
-  if (mutating) {
+  if (mutating && auth.transport !== "bearer") {
     if (auth.origin && auth.host) {
       let originHost = "";
       try {
@@ -382,6 +408,82 @@ export function createHandlers(deps: HandlerDeps) {
     });
   }
 
+  async function postInvoke(auth: AuthContext, request: Request): Promise<Response> {
+    const scope = requireUser(auth, true);
+    if (!deps.invoke || !deps.invokeStream) {
+      throw new AIConnectionsError("CAPABILITY_UNSUPPORTED", "Invoke is not enabled on this host.");
+    }
+    const body = parseInvokeBody(await readBody(request, deps.maxInvokeBodyBytes ?? INVOKE_BODY_LIMIT));
+    if (body.stream !== true) {
+      const result = await deps.invoke(scope, { capability: body.capability, input: body.input, stream: false });
+      return json(200, { ok: true, data: result });
+    }
+    const iterator = deps.invokeStream(scope, { capability: body.capability, input: body.input, stream: true })[
+      Symbol.asyncIterator
+    ]();
+    let first: IteratorResult<InvokeStreamEvent>;
+    try {
+      first = await iterator.next();
+    } catch (error) {
+      if (typeof iterator.return === "function") await iterator.return().catch(() => undefined);
+      throw error;
+    }
+    if (first.done) {
+      return fail(new AIConnectionsError("UPSTREAM_UNAVAILABLE", UPSTREAM_ERROR_MESSAGES.unknown));
+    }
+    const encoder = new TextEncoder();
+    const firstEvent = first.value;
+    let closed = false;
+    const stream = new ReadableStream({
+      async start(controller) {
+        const send = (event: string, data: unknown) => {
+          if (closed) return;
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        };
+        try {
+          writeStreamEvent(send, firstEvent);
+          while (!closed) {
+            const next = await iterator.next();
+            if (next.done || closed) break;
+            writeStreamEvent(send, next.value);
+          }
+        } catch (error) {
+          const mapped =
+            error instanceof AIConnectionsError
+              ? error
+              : new AIConnectionsError("UPSTREAM_UNAVAILABLE", UPSTREAM_ERROR_MESSAGES.unknown);
+          deps.logger.error("ai.invoke", { code: mapped.code });
+          try {
+            send("error", { ok: false, error: { code: mapped.code, message: messageForVisitor(mapped) } });
+          } catch {
+            closed = true;
+          }
+        } finally {
+          if (!closed) {
+            closed = true;
+            try {
+              controller.close();
+            } catch {
+              // The client already went away.
+            }
+          }
+        }
+      },
+      cancel() {
+        closed = true;
+        if (typeof iterator.return === "function") void iterator.return();
+      },
+    });
+    return new Response(stream, {
+      status: 200,
+      headers: {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache, no-transform",
+        "x-accel-buffering": "no",
+      },
+    });
+  }
+
   async function dispatch(request: Request, auth: AuthContext): Promise<Response> {
     const url = new URL(request.url);
     const parts = url.pathname.split("/").filter(Boolean);
@@ -409,6 +511,9 @@ export function createHandlers(deps: HandlerDeps) {
       if (tail[0] === "usage" && request.method === "GET") {
         return await getUsage(auth, request);
       }
+      if (tail[0] === "invoke" && tail.length === 1 && request.method === "POST") {
+        return await postInvoke(auth, request);
+      }
       return json(404, { ok: false, error: { code: "INVALID_CONFIG", message: "Unknown AI route." } });
     } catch (error) {
       if (error instanceof AIConnectionsError) {
@@ -421,4 +526,95 @@ export function createHandlers(deps: HandlerDeps) {
   }
 
   return { dispatch, getConnections, putConnection, deleteConnection, testConnection, getModels, putSelection, getUsage };
+}
+
+function writeStreamEvent(send: (event: string, data: unknown) => void, event: InvokeStreamEvent): void {
+  if (event.type === "delta") {
+    send("delta", { text: event.text });
+    return;
+  }
+  send("done", { ok: true, data: event.result });
+}
+
+function parseInvokeBody(value: unknown): InvokeBody {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new AIConnectionsError("INVALID_CONFIG", "Request body must be JSON.");
+  }
+  const body = value as Record<string, unknown>;
+  if (typeof body.capability !== "string" || !isCapability(body.capability)) {
+    throw new AIConnectionsError("INVALID_CONFIG", "Choose chat or vision.");
+  }
+  if (!Array.isArray(body.input) || body.input.length === 0) {
+    throw new AIConnectionsError("INVALID_CONFIG", "Include a message.");
+  }
+  if (body.input.length > MAX_MESSAGES) {
+    throw new AIConnectionsError("INVALID_CONFIG", "Include at most 32 messages.");
+  }
+  if (body.stream !== undefined && typeof body.stream !== "boolean") {
+    throw new AIConnectionsError("INVALID_CONFIG", "stream must be a boolean.");
+  }
+  const input = body.input.map((item) => parseMessage(item));
+  return {
+    capability: body.capability,
+    input,
+    ...(typeof body.stream === "boolean" ? { stream: body.stream } : {}),
+  };
+}
+
+function parseMessage(value: unknown): InputMessage {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new AIConnectionsError("INVALID_CONFIG", "Each message must be an object.");
+  }
+  const message = value as Record<string, unknown>;
+  if (message.role !== "user" && message.role !== "assistant" && message.role !== "system") {
+    throw new AIConnectionsError("INVALID_CONFIG", "Message role must be user, assistant, or system.");
+  }
+  let text: string | undefined;
+  if (message.text !== undefined) {
+    if (typeof message.text !== "string" || message.text.length === 0) {
+      throw new AIConnectionsError("INVALID_CONFIG", "Message text must be a non-empty string.");
+    }
+    text = message.text;
+  }
+  let parts: ContentPart[] | undefined;
+  if (message.parts !== undefined) {
+    if (!Array.isArray(message.parts) || message.parts.length === 0) {
+      throw new AIConnectionsError("INVALID_CONFIG", "Each message needs text or parts.");
+    }
+    if (message.parts.length > MAX_PARTS) {
+      throw new AIConnectionsError("INVALID_CONFIG", "Include at most 8 parts in a message.");
+    }
+    parts = message.parts.map((part) => parsePart(part));
+  }
+  if (text === undefined && parts === undefined) {
+    throw new AIConnectionsError("INVALID_CONFIG", "Each message needs text or parts.");
+  }
+  return {
+    role: message.role,
+    ...(text !== undefined ? { text } : {}),
+    ...(parts ? { parts } : {}),
+  };
+}
+
+function parsePart(value: unknown): ContentPart {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new AIConnectionsError("INVALID_CONFIG", "Each message needs text or parts.");
+  }
+  const part = value as Record<string, unknown>;
+  if (part.type === "text") {
+    if (typeof part.text !== "string" || part.text.length === 0) {
+      throw new AIConnectionsError("INVALID_CONFIG", "Message text must be a non-empty string.");
+    }
+    return { type: "text", text: part.text };
+  }
+  if (part.type === "image") {
+    if (typeof part.mimeType !== "string" || !IMAGE_TYPES.has(part.mimeType)) {
+      throw new AIConnectionsError("INVALID_CONFIG", "Image type must be png, jpeg, webp, or gif.");
+    }
+    if (typeof part.data !== "string" || part.data.length === 0 || !/^[A-Za-z0-9+/=\r\n]+$/.test(part.data)) {
+      throw new AIConnectionsError("INVALID_CONFIG", "Image data must be base64, without a data: prefix.");
+    }
+    return { type: "image", mimeType: part.mimeType, data: part.data };
+  }
+  throw new AIConnectionsError("INVALID_CONFIG", "Each message needs text or parts.");
 }

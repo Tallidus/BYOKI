@@ -137,7 +137,7 @@ export function DemoApp({
               <p className="kicker">Host route</p>
               <h2 id="try-heading">Send a request</h2>
               <p className="meta">
-                <code className="inline">POST /api/ai/invoke</code> calls <code className="inline">router.forScope</code> with this session. The settings client never sends the prompt.
+                <code className="inline">POST /api/ai/invoke</code> goes through <code className="inline">handlers.dispatch</code> for this session. The settings client never sends the prompt.
               </p>
             </div>
             <TryForm csrfToken={csrfToken} onRequested={() => setUsageRevision((value) => value + 1)} />

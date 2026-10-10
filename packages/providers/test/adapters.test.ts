@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AIConnectionsError, type ProviderRequest } from "@byoki/core";
+import { AIConnectionsError, type ProviderRequest, type ProviderStreamEvent } from "@byoki/core";
 import { createAnthropicAdapter } from "../src/anthropic.js";
 import { createGeminiAdapter } from "../src/gemini.js";
 import { createOpenAIAdapter } from "../src/openai.js";
@@ -102,6 +102,9 @@ describe("provider adapters", () => {
     const body = JSON.parse(String(invokeCall?.init.body));
     expect(body.messages[0].content[1].type).toBe("image");
     expect((invokeCall?.init.headers as Record<string, string>)["x-api-key"]).toBe("sk-ant-test");
+    expect((invokeCall?.init.headers as Record<string, string>)["anthropic-dangerous-direct-browser-access"]).toBe(
+      "true",
+    );
     const down = createAnthropicAdapter(mockFetch(() => ({ status: 503, body: { error: { message: "unavailable" } } })));
     await expect(down.testConnection("sk-ant-test")).resolves.toMatchObject({ ok: false });
   });
@@ -141,5 +144,123 @@ describe("provider adapters", () => {
     expect(body.contents[0].parts[1].inline_data.mime_type).toBe("image/png");
     const missing = createGeminiAdapter(mockFetch(() => ({ status: 404, body: { error: { message: "model gone" } } })));
     await expect(missing.invoke(request, "AIza-test-key")).rejects.toMatchObject({ code: "MODEL_UNAVAILABLE" });
+  });
+});
+
+function streamFetch(status: number, body: string): FetchLike & { calls: Array<{ url: string; init: RequestInit }> } {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const fn: FetchLike = async (url, init) => {
+    calls.push({ url, init });
+    return new Response(body, { status, headers: { "content-type": "text/event-stream" } });
+  };
+  return Object.assign(fn, { calls });
+}
+
+async function collect(source: AsyncIterable<ProviderStreamEvent>): Promise<ProviderStreamEvent[]> {
+  const events: ProviderStreamEvent[] = [];
+  for await (const event of source) events.push(event);
+  return events;
+}
+
+describe("provider streaming", () => {
+  it("maps OpenAI SSE deltas and usage without echoing a key", async () => {
+    const secret = "sk-supersecretkeyvalue";
+    const fetchImpl = streamFetch(
+      200,
+      [
+        `data: {"id":"chatcmpl-1","choices":[{"delta":{"content":"A "}}]}`,
+        "",
+        `data: {"id":"chatcmpl-1","choices":[{"delta":{"content":"warning."}}]}`,
+        "",
+        `data: {"id":"chatcmpl-1","choices":[],"usage":{"prompt_tokens":20,"completion_tokens":4,"prompt_tokens_details":{"cached_tokens":2}}}`,
+        "",
+        "data: [DONE]",
+        "",
+      ].join("\n"),
+    );
+    const adapter = createOpenAIAdapter(fetchImpl);
+    const events = await collect(adapter.invokeStream!({ ...request, modelId: "gpt-5.6-luna" }, secret));
+    expect(events.filter((event) => event.type === "delta").map((event) => (event.type === "delta" ? event.text : ""))).toEqual([
+      "A ",
+      "warning.",
+    ]);
+    const done = events.at(-1);
+    expect(done?.type).toBe("done");
+    if (done?.type === "done") {
+      expect(done.output).toEqual([{ type: "text", text: "A warning." }]);
+      expect(done.usage).toMatchObject({ inputTokens: 20, outputTokens: 4, cacheReadTokens: 2 });
+      expect(done.providerRequestId).toBe("chatcmpl-1");
+    }
+    const body = JSON.parse(String(fetchImpl.calls[0]?.init.body));
+    expect(body.stream).toBe(true);
+    expect(body.stream_options).toEqual({ include_usage: true });
+    expect(fetchImpl.calls[0]?.url).not.toContain(secret);
+    expect(JSON.stringify(events)).not.toContain(secret);
+
+    const leaked = "data: {\"error\":{\"code\":\"invalid_api_key\",\"message\":\"bad key sk-supersecretkeyvalue\"}}\n\n";
+    const failing = createOpenAIAdapter(streamFetch(200, `data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n${leaked}`));
+    const partial: ProviderStreamEvent[] = [];
+    await expect(async () => {
+      for await (const event of failing.invokeStream!(request, secret)) partial.push(event);
+    }).rejects.toMatchObject({
+      code: "INVALID_KEY",
+      message: expect.not.stringContaining(secret),
+    });
+    expect(partial).toEqual([{ type: "delta", text: "Hi" }]);
+  });
+
+  it("maps Anthropic text deltas and usage", async () => {
+    const body = [
+      `event: message_start`,
+      `data: {"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":11,"cache_read_input_tokens":3}}}`,
+      "",
+      `event: content_block_delta`,
+      `data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"It is"}}`,
+      "",
+      `event: content_block_delta`,
+      `data: {"type":"content_block_delta","delta":{"type":"text_delta","text":" a gauge."}}`,
+      "",
+      `event: message_delta`,
+      `data: {"type":"message_delta","usage":{"output_tokens":5}}`,
+      "",
+      `event: message_stop`,
+      `data: {"type":"message_stop"}`,
+      "",
+    ].join("\n");
+    const fetchImpl = streamFetch(200, body);
+    const adapter = createAnthropicAdapter(fetchImpl);
+    const events = await collect(adapter.invokeStream!({ ...request, modelId: "claude-sonnet-5" }, "sk-ant-test"));
+    const done = events.at(-1);
+    expect(done?.type).toBe("done");
+    if (done?.type === "done") {
+      expect(done.output).toEqual([{ type: "text", text: "It is a gauge." }]);
+      expect(done.usage).toMatchObject({ inputTokens: 11, outputTokens: 5, cacheReadTokens: 3 });
+      expect(done.providerRequestId).toBe("msg_1");
+    }
+    const sent = JSON.parse(String(fetchImpl.calls[0]?.init.body));
+    expect(sent.stream).toBe(true);
+    expect((fetchImpl.calls[0]?.init.headers as Record<string, string>)["x-api-key"]).toBe("sk-ant-test");
+  });
+
+  it("maps Gemini SSE without putting the key in the URL", async () => {
+    const secret = "AIza-test-key";
+    const body = [
+      `data: {"candidates":[{"content":{"parts":[{"text":"A photo"}]}}]}`,
+      "",
+      `data: {"responseId":"gem-1","candidates":[{"content":{"parts":[{"text":" of a dashboard."}]}}],"usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":6}}`,
+      "",
+    ].join("\n");
+    const fetchImpl = streamFetch(200, body);
+    const adapter = createGeminiAdapter(fetchImpl);
+    const events = await collect(adapter.invokeStream!({ ...request, modelId: "gemini-3.5-flash" }, secret));
+    const done = events.at(-1);
+    expect(done?.type).toBe("done");
+    if (done?.type === "done") {
+      expect(done.output).toEqual([{ type: "text", text: "A photo of a dashboard." }]);
+      expect(done.usage).toMatchObject({ inputTokens: 9, outputTokens: 6 });
+    }
+    expect(fetchImpl.calls[0]?.url).toContain(":streamGenerateContent?alt=sse");
+    expect(fetchImpl.calls[0]?.url).not.toContain(secret);
+    expect((fetchImpl.calls[0]?.init.headers as Record<string, string>)["x-goog-api-key"]).toBe(secret);
   });
 });

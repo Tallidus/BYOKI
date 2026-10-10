@@ -1,0 +1,41 @@
+{
+  "updatedAt": "2026-09-25T00:00:00.000Z",
+  "models": [
+    {
+      "id": "gpt-5.6-terra",
+      "provider": "openai",
+      "displayName": "GPT-5.6 Terra",
+      "capabilities": ["chat", "vision"]
+    },
+    {
+      "id": "gpt-5.6-luna",
+      "provider": "openai",
+      "displayName": "GPT-5.6 Luna",
+      "capabilities": ["chat", "vision"]
+    },
+    {
+      "id": "claude-sonnet-5",
+      "provider": "anthropic",
+      "displayName": "Claude Sonnet 5",
+      "capabilities": ["chat", "vision"]
+    },
+    {
+      "id": "claude-haiku-4-5",
+      "provider": "anthropic",
+      "displayName": "Claude Haiku 4.5",
+      "capabilities": ["chat", "vision"]
+    },
+    {
+      "id": "gemini-3.5-flash",
+      "provider": "gemini",
+      "displayName": "Gemini 3.5 Flash",
+      "capabilities": ["chat", "vision"]
+    },
+    {
+      "id": "gemini-3.1-flash-lite",
+      "provider": "gemini",
+      "displayName": "Gemini 3.1 Flash-Lite",
+      "capabilities": ["chat", "vision"]
+    }
+  ]
+}

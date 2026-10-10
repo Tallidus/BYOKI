@@ -1,6 +1,6 @@
 # Integration guide
 
-BYOKI is an ESM package set for Node 20 or newer. `@byoki/react` requires React 19. There is no CommonJS build. Real provider streaming is not part of 0.1. A model without a reviewed price entry shows “Cost unavailable,” not zero.
+The primary BYOKI integration calls the provider from the user's device. Web, Flutter, and other clients follow [INTEGRATING.md](INTEGRATING.md) and [spec/SPEC.md](../spec/SPEC.md). This page is the optional Node host: an ESM package set for Node 20 or newer. `@byoki/react` requires React 19. There is no CommonJS build. `router.invoke` stays a single buffered result. A model without a reviewed price entry shows “Cost unavailable,” not zero.
 
 Install the packages in a TypeScript host that already authenticates users:
 
@@ -59,7 +59,7 @@ A capability controls SDK routing and the settings screen. It does not limit wha
 
 ## Host routes
 
-Forward `/api/ai/*` to `ai.handlers.dispatch` with the session scope and CSRF token. The example does this in `examples/next-app/app/api/ai/[[...path]]/route.ts`. A separate host route, such as `POST /api/ai/invoke`, calls `ai.router`. The settings client does not send prompts.
+Forward `/api/ai/*` to `ai.handlers.dispatch` with the session scope and CSRF token. The example does this in `examples/next-app/app/api/ai/[[...path]]/route.ts`. That includes `POST /api/ai/invoke`. The settings client does not send prompts. Browsers use the cookie and `x-csrf-token`. Native clients use a bearer session; see [INTEGRATING.md](INTEGRATING.md).
 
 Mutating requests need the session cookie and an `x-csrf-token` header that matches the session.
 
@@ -87,8 +87,7 @@ Pass `csrfToken` from the server session. The browser package does not store key
 ## What 0.1 does not include
 
 - CommonJS entry points or a React 18 build.
-- Streaming from OpenAI, Anthropic, or Gemini. The mock adapter can record a streamed ledger row so the shape is covered.
 - Prices for every catalog model. Missing prices stay unknown.
-- A hosted multi-tenant service, Ollama, embeddings, image generation, or speech.
+- A hosted multi-tenant service, Ollama, embeddings, image generation, or speech. You run the Node host.
 
 Set `BYOKI_USE_MOCK=1` in the example to avoid paid API calls. Live smoke tests stay out of CI. Run them with `BYOKI_LIVE=1` and `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GEMINI_API_KEY`.

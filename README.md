@@ -1,6 +1,8 @@
 # BYOKI
 
-Bring-your-own-key infrastructure for app developers. Your users connect their own OpenAI, Anthropic, or Gemini keys. You keep authentication. The SDK stores keys on your server, routes by capability, and records usage.
+Bring-your-own-key infrastructure for app developers. Your users connect their own OpenAI, Anthropic, or Gemini keys. The primary path calls that provider directly from the user's device. The key stays in platform secure storage and is not sent to an application server.
+
+An optional Node host can still store keys and route calls for an app that wants that. It is not required.
 
 The live demo, docs, and downloads are at [https://byoki.eastonnielson.dev](https://byoki.eastonnielson.dev).
 
@@ -8,6 +10,8 @@ The live demo, docs, and downloads are at [https://byoki.eastonnielson.dev](http
 - [Live demo](https://byoki.eastonnielson.dev/demo)
 - [Downloads](https://byoki.eastonnielson.dev/downloads)
 - [Integration guide](docs/integration.md)
+- [On-device integration for web, Flutter, and other clients](docs/INTEGRATING.md)
+- [On-device specification](spec/SPEC.md)
 - [API reference](docs/api.md)
 - [Deployment](docs/deployment.md)
 - [Threat model](docs/threat-model.md)

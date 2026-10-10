@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Tallidus/BYOKI/blob/main/spec/schemas/invoke-request.json",
+  "title": "On-device invoke request",
+  "description": "In-memory request. Do not log it and do not send it to anyone except the detected provider.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["modelId", "input"],
+  "properties": {
+    "provider": { "enum": ["openai", "anthropic", "gemini"] },
+    "modelId": { "type": "string", "pattern": "^[A-Za-z0-9._:-]+$" },
+    "capability": { "enum": ["chat", "vision"] },
+    "maxOutputTokens": { "type": "integer", "minimum": 1 },
+    "timeoutMs": { "type": "integer", "minimum": 1 },
+    "input": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/message" }
+    }
+  },
+  "$defs": {
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role"],
+      "properties": {
+        "role": { "enum": ["user", "assistant", "system"] },
+        "text": { "type": "string" },
+        "parts": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/part" }
+        }
+      }
+    },
+    "part": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "text"],
+          "properties": {
+            "type": { "const": "text" },
+            "text": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "mimeType", "data"],
+          "properties": {
+            "type": { "const": "image" },
+            "mimeType": { "enum": ["image/png", "image/jpeg", "image/webp", "image/gif"] },
+            "data": { "type": "string", "description": "Raw base64. Not a data URL." }
+          }
+        }
+      ]
+    }
+  }
+}

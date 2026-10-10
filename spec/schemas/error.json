@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Tallidus/BYOKI/blob/main/spec/schemas/error.json",
+  "title": "On-device provider error",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["category", "message"],
+  "properties": {
+    "category": { "enum": ["invalid_key", "rate_limited", "quota", "unavailable", "unknown"] },
+    "message": {
+      "enum": [
+        "The provider rejected this key. Check the key and try again.",
+        "The provider rate limit was reached. Wait and try again.",
+        "The provider quota or billing limit was reached. Check the provider account.",
+        "The provider is unavailable or the request timed out. Try again later.",
+        "The provider request failed. Try again.",
+        "Enter a provider API key."
+      ]
+    }
+  }
+}

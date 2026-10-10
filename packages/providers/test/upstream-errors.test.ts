@@ -52,9 +52,14 @@ describe("upstream errors stay off the visitor result", () => {
         body: { error: { message: leakMessage("bad"), type: "invalid_request_error", code: "invalid_api_key" } },
       },
       {
-        category: "rate_limited" as const,
+        category: "quota" as const,
         status: 429,
         body: { error: { message: leakMessage("quota"), type: "insufficient_quota", code: "insufficient_quota" } },
+      },
+      {
+        category: "rate_limited" as const,
+        status: 429,
+        body: { error: { message: leakMessage("rate"), type: "rate_limit_error", code: "rate_limit_exceeded" } },
       },
       {
         category: "unavailable" as const,

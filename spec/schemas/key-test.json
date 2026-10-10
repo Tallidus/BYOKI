@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Tallidus/BYOKI/blob/main/spec/schemas/key-test.json",
+  "title": "On-device key test",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "provider"],
+      "properties": {
+        "ok": { "const": true },
+        "provider": { "enum": ["openai", "anthropic", "gemini"] }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "provider", "category", "message"],
+      "properties": {
+        "ok": { "const": false },
+        "provider": { "type": ["string", "null"], "enum": ["openai", "anthropic", "gemini", null] },
+        "category": { "enum": ["invalid_key", "rate_limited", "quota", "unavailable", "unknown"] },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    }
+  ]
+}

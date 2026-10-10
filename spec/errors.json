@@ -1,0 +1,10 @@
+{
+  "categories": ["invalid_key", "rate_limited", "quota", "unavailable", "unknown"],
+  "messages": {
+    "invalid_key": "The provider rejected this key. Check the key and try again.",
+    "rate_limited": "The provider rate limit was reached. Wait and try again.",
+    "quota": "The provider quota or billing limit was reached. Check the provider account.",
+    "unavailable": "The provider is unavailable or the request timed out. Try again later.",
+    "unknown": "The provider request failed. Try again."
+  }
+}

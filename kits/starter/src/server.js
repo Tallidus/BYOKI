@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { createMockAdapter, defineAIConnections } from "@byoki/core";
 import { PRICE_CATALOG, estimateCost } from "@byoki/pricing";
 import { MANUAL_CATALOG, PROVIDER_LINKS, createProviderAdapters } from "@byoki/providers";
-import { createAIConnectionsApp } from "@byoki/server";
+import { PayloadTooLargeError, createAIConnectionsApp, readIncomingRequest, writeFetchResponse } from "@byoki/server";
 
 const mock = process.env.BYOKI_USE_MOCK !== "0";
 
@@ -51,25 +51,6 @@ function send(res, status, body, extraHeaders) {
   res.end(payload);
 }
 
-function headerPairs(headers) {
-  const pairs = [];
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === "host" || key.toLowerCase() === "content-length") continue;
-    if (typeof value === "string") pairs.push([key, value]);
-    else if (Array.isArray(value)) pairs.push([key, value.join(", ")]);
-  }
-  return pairs;
-}
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
-  });
-}
-
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? "/", "http://127.0.0.1:8787");
@@ -81,12 +62,16 @@ const server = createServer(async (req, res) => {
       send(res, 404, { ok: false, error: { code: "INVALID_CONFIG", message: "Try GET /health or /api/ai/connections." } });
       return;
     }
-    const body = req.method === "GET" || req.method === "HEAD" ? undefined : await readBody(req);
-    const request = new Request(url, {
-      method: req.method,
-      headers: headerPairs(req.headers),
-      body,
-    });
+    let request;
+    try {
+      request = await readIncomingRequest(req);
+    } catch (error) {
+      if (error instanceof PayloadTooLargeError) {
+        send(res, 413, { ok: false, error: { code: "PAYLOAD_TOO_LARGE", message: "Request body is too large." } });
+        return;
+      }
+      throw error;
+    }
     const response = await ai.handlers.dispatch(request, {
       scope: user,
       csrfHeader: req.headers["x-csrf-token"] ?? "local-dev",
@@ -94,15 +79,12 @@ const server = createServer(async (req, res) => {
       origin: null,
       host: null,
     });
-    const payload = Buffer.from(await response.arrayBuffer());
-    const headers = { "content-length": String(payload.length) };
-    response.headers.forEach((value, key) => {
-      if (key.toLowerCase() === "content-length") return;
-      headers[key] = value;
-    });
-    res.writeHead(response.status, headers);
-    res.end(payload);
+    await writeFetchResponse(res, response);
   } catch {
+    if (res.headersSent || res.writableEnded) {
+      res.end();
+      return;
+    }
     send(res, 500, {
       ok: false,
       error: { code: "UPSTREAM_UNAVAILABLE", message: "The provider request failed. Try again." },

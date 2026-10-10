@@ -30,9 +30,14 @@ curl -s -X PUT http://127.0.0.1:8787/api/ai/selections/chat \
   -H 'content-type: application/json' \
   -H 'x-csrf-token: local-dev' \
   -d '{"provider":"openai","modelId":"gpt-5.6-terra"}'
+
+curl -N -s -X POST http://127.0.0.1:8787/api/ai/invoke \
+  -H 'content-type: application/json' \
+  -H 'x-csrf-token: local-dev' \
+  -d '{"capability":"chat","input":[{"role":"user","text":"Hello"}],"stream":true}'
 ```
 
-Calling the model is the host's route. See the Next.js example in the BYOKI docs. This kit shows the settings handlers and the development store.
+`POST /api/ai/invoke` is part of `handlers.dispatch`. `stream: true` responds with `text/event-stream`. Omit `stream` for one JSON body. This kit signs every request in as `local-dev` and treats a missing `x-csrf-token` as that local token. That is only safe on `127.0.0.1`. Replace the fixed user before you expose a port. See `docs/INTEGRATING.md` for bearer tokens, Flutter, and the request shapes.
 
 ## Production
 

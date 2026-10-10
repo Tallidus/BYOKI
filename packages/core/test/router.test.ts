@@ -240,4 +240,72 @@ describe("router", () => {
     expect(stores.rows[0]?.streamed).toBe(true);
     expect(JSON.stringify(stores.rows)).not.toContain("secret prompt text");
   });
+
+  it("streams deltas from the adapter and keeps the prompt out of the ledger", async () => {
+    const stores = memory();
+    await stores.credentials.put(scope, "openai", "sk-alice-secret-key-123456");
+    await stores.selectionStore.put(scope, {
+      capability: "chat",
+      provider: "openai",
+      modelId: "openai-mock-chat",
+    });
+    const events = [];
+    for await (const event of routerFor(stores).forScope(scope).invokeStream({
+      capability: "chat",
+      input: [{ role: "user", text: "secret prompt text" }],
+    })) {
+      events.push(event);
+    }
+    const deltas = events.filter((event) => event.type === "delta");
+    expect(deltas.length).toBeGreaterThan(1);
+    const joined = deltas.map((event) => (event.type === "delta" ? event.text : "")).join("");
+    const done = events.at(-1);
+    expect(done?.type).toBe("done");
+    if (done?.type === "done") expect(done.result.outputText).toBe(joined);
+    expect(joined).toContain("secret prompt text");
+    expect(stores.rows).toHaveLength(1);
+    expect(stores.rows[0]?.streamed).toBe(true);
+    expect(stores.rows[0]?.outcome).toBe("success");
+    expect(JSON.stringify(stores.rows)).not.toContain("secret prompt text");
+    expect(JSON.stringify(stores.rows)).not.toContain("sk-alice-secret-key-123456");
+  });
+
+  it("emits one delta when the adapter does not implement invokeStream", async () => {
+    const stores = memory();
+    await stores.credentials.put(scope, "openai", "valid-key");
+    await stores.selectionStore.put(scope, {
+      capability: "chat",
+      provider: "openai",
+      modelId: "openai-mock-chat",
+    });
+    const mock = createMockAdapter("openai", { models: [catalog[0]!] });
+    const adapter = {
+      id: mock.id,
+      supportedCapabilities: mock.supportedCapabilities,
+      testMaySpendQuota: mock.testMaySpendQuota,
+      testConnection: (key: string) => mock.testConnection(key),
+      listModels: (key: string) => mock.listModels(key),
+      invoke: (request: Parameters<typeof mock.invoke>[0], key: string) => mock.invoke(request, key),
+    };
+    const events = [];
+    for await (const event of createRouter({
+      config: defineAIConnections({
+        appName: "Garage Assistant",
+        capabilities: { chat: { description: "Chat", providers: ["openai"], required: true } },
+      }),
+      adapters: { openai: adapter },
+      credentials: stores.credentials,
+      selections: stores.selectionStore,
+      ledger: stores.ledger,
+      catalog,
+    }).forScope(scope).invokeStream({
+      capability: "chat",
+      input: [{ role: "user", text: "Hello" }],
+    })) {
+      events.push(event);
+    }
+    expect(events.filter((event) => event.type === "delta")).toHaveLength(1);
+    expect(events.at(-1)?.type).toBe("done");
+    expect(stores.rows[0]?.streamed).toBe(true);
+  });
 });

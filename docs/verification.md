@@ -11,4 +11,4 @@
 | UI | React tests cover the password field, purpose text, and unknown cost. The example flow is also checked in a browser. |
 | Packaging | `tests/packaging.test.ts` checks the browser entry and that `@byoki/react` does not depend on `@byoki/server`. |
 
-Streaming for the paid adapters is not enabled. The mock path records `streamed: true` so the ledger shape is covered. Real provider streaming stays off until the non-streaming path is the one you operate.
+`POST /api/ai/invoke` with `stream: true` writes `text/event-stream`. Adapter tests parse mocked OpenAI, Anthropic, and Gemini streams. A Node server test checks that the first delta is written before the rest of the stream is ready. Buffered `router.invoke` is unchanged.

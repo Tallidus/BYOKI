@@ -76,7 +76,7 @@ function assertNoLeak(text: string) {
 
 describe("connection test responses", () => {
   it("replaces each failure category and a raw adapter reason", async () => {
-    const categories = ["invalid_key", "rate_limited", "unavailable", "unknown"] as const;
+    const categories = ["invalid_key", "rate_limited", "quota", "unavailable", "unknown"] as const;
     for (const category of categories) {
       const logs: string[] = [];
       const response = await handlers(

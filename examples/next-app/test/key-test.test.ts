@@ -53,7 +53,8 @@ describe("key test HTTP response", () => {
   it("returns a fixed category message for each upstream failure", async () => {
     const cases = [
       { status: 401, code: "invalid_api_key", category: "invalid_key" as const },
-      { status: 429, code: "insufficient_quota", category: "rate_limited" as const },
+      { status: 429, code: "insufficient_quota", category: "quota" as const },
+      { status: 429, code: "rate_limit_exceeded", category: "rate_limited" as const },
       { status: 503, code: "server_error", category: "unavailable" as const },
       { status: 400, code: "something_else", category: "unknown" as const },
     ];

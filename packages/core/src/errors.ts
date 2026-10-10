@@ -3,13 +3,23 @@ import { UPSTREAM_ERROR_CATEGORIES, type ErrorCode, type UpstreamErrorCategory }
 export class AIConnectionsError extends Error {
   readonly code: ErrorCode;
   readonly providerRequestId?: string;
+  /** Visitor category when `code` alone cannot tell rate limits from quota. */
+  readonly category?: UpstreamErrorCategory;
 
-  constructor(code: ErrorCode, message: string, providerRequestId?: string) {
+  constructor(
+    code: ErrorCode,
+    message: string,
+    providerRequestId?: string,
+    category?: UpstreamErrorCategory,
+  ) {
     super(message);
     this.name = "AIConnectionsError";
     this.code = code;
     if (providerRequestId !== undefined) {
       this.providerRequestId = providerRequestId;
+    }
+    if (category !== undefined) {
+      this.category = category;
     }
   }
 }
@@ -25,7 +35,8 @@ export function isAIConnectionsError(error: unknown): error is AIConnectionsErro
  */
 export const UPSTREAM_ERROR_MESSAGES: Record<UpstreamErrorCategory, string> = {
   invalid_key: "The provider rejected this key. Check the key and try again.",
-  rate_limited: "The provider rate limit or quota was reached. Wait and try again.",
+  rate_limited: "The provider rate limit was reached. Wait and try again.",
+  quota: "The provider quota or billing limit was reached. Check the provider account.",
   unavailable: "The provider is unavailable or the request timed out. Try again later.",
   unknown: "The provider request failed. Try again.",
 };
@@ -91,12 +102,12 @@ export function connectionTestCategory(result: {
   return fromReason?.[0] ?? "unknown";
 }
 
-function fallbackFor(code: ErrorCode): string {
-  switch (code) {
+function fallbackFor(error: AIConnectionsError): string {
+  switch (error.code) {
     case "INVALID_KEY":
       return UPSTREAM_ERROR_MESSAGES.invalid_key;
     case "RATE_LIMITED":
-      return UPSTREAM_ERROR_MESSAGES.rate_limited;
+      return error.category === "quota" ? UPSTREAM_ERROR_MESSAGES.quota : UPSTREAM_ERROR_MESSAGES.rate_limited;
     case "MODEL_UNAVAILABLE":
       return MODEL_UNAVAILABLE_MESSAGE;
     case "UPSTREAM_UNAVAILABLE":
@@ -117,7 +128,10 @@ export function messageForVisitor(error: AIConnectionsError): string {
       message = error.message === LOCAL_INVALID_KEY ? error.message : UPSTREAM_ERROR_MESSAGES.invalid_key;
       break;
     case "RATE_LIMITED":
-      message = error.message === LOCAL_RATE_LIMIT ? error.message : UPSTREAM_ERROR_MESSAGES.rate_limited;
+      if (error.message === LOCAL_RATE_LIMIT) message = error.message;
+      else if (error.category === "quota" || error.message === UPSTREAM_ERROR_MESSAGES.quota) {
+        message = UPSTREAM_ERROR_MESSAGES.quota;
+      } else message = UPSTREAM_ERROR_MESSAGES.rate_limited;
       break;
     case "MODEL_UNAVAILABLE":
       if (LOCAL_MODEL_MESSAGES.has(error.message)) message = error.message;
@@ -134,5 +148,5 @@ export function messageForVisitor(error: AIConnectionsError): string {
       message = error.message;
       break;
   }
-  return scrubVisitorText(message, fallbackFor(error.code));
+  return scrubVisitorText(message, fallbackFor(error));
 }

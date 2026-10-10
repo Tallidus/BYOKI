@@ -4,10 +4,20 @@ import {
   type ProviderAdapter,
   type ProviderRequest,
   type ProviderResult,
+  type ProviderStreamEvent,
   type UsageUnits,
 } from "@byoki/core";
 import { CATALOG_UPDATED_AT } from "./catalog.js";
-import { failedConnectionTest, providerFetch, readError, type FetchLike } from "./http.js";
+import {
+  failedConnectionTest,
+  providerFetch,
+  providerStream,
+  readError,
+  readJsonRecord,
+  readSse,
+  throwProviderEventError,
+  type FetchLike,
+} from "./http.js";
 
 const BASE = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -19,6 +29,7 @@ export function createGeminiAdapter(fetchImpl: FetchLike = fetch): ProviderAdapt
     testConnection: (key) => testKey(fetchImpl, key),
     listModels: (key) => listModels(fetchImpl, key),
     invoke: (request, key) => invoke(fetchImpl, request, key),
+    invokeStream: (request, key) => invokeStream(fetchImpl, request, key),
   };
 }
 
@@ -57,8 +68,7 @@ async function listModels(fetchImpl: FetchLike, key: string): Promise<ModelOptio
     .filter((item) => item.capabilities.length > 0);
 }
 
-async function invoke(fetchImpl: FetchLike, request: ProviderRequest, key: string): Promise<ProviderResult> {
-  const started = Date.now();
+function generateBody(request: ProviderRequest): string {
   const system = request.input
     .filter((message) => message.role === "system")
     .flatMap((message) => message.parts.filter((part) => part.type === "text").map((part) => part.text))
@@ -73,19 +83,24 @@ async function invoke(fetchImpl: FetchLike, request: ProviderRequest, key: strin
           : { inline_data: { mime_type: part.mimeType, data: part.data } },
       ),
     }));
+  return JSON.stringify({
+    ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+    contents,
+    ...(request.maxOutputTokens !== undefined
+      ? { generationConfig: { maxOutputTokens: request.maxOutputTokens } }
+      : {}),
+  });
+}
+
+async function invoke(fetchImpl: FetchLike, request: ProviderRequest, key: string): Promise<ProviderResult> {
+  const started = Date.now();
   const response = await providerFetch(
     fetchImpl,
     `${BASE}/models/${encodeURIComponent(request.modelId)}:generateContent`,
     {
       method: "POST",
       headers: { ...headers(key), "content-type": "application/json" },
-      body: JSON.stringify({
-        ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
-        contents,
-        ...(request.maxOutputTokens !== undefined
-          ? { generationConfig: { maxOutputTokens: request.maxOutputTokens } }
-          : {}),
-      }),
+      body: generateBody(request),
     },
     request.timeoutMs,
   );
@@ -120,4 +135,84 @@ async function invoke(fetchImpl: FetchLike, request: ProviderRequest, key: strin
     usageGaps: gaps,
     metadata: { gemini: { endpoint: "generateContent" } },
   };
+}
+
+async function* invokeStream(
+  fetchImpl: FetchLike,
+  request: ProviderRequest,
+  key: string,
+): AsyncGenerator<ProviderStreamEvent> {
+  const started = Date.now();
+  const pending = await providerStream(
+    fetchImpl,
+    `${BASE}/models/${encodeURIComponent(request.modelId)}:streamGenerateContent?alt=sse`,
+    {
+      method: "POST",
+      headers: { ...headers(key), "content-type": "application/json" },
+      body: generateBody(request),
+    },
+    request.timeoutMs,
+  );
+  try {
+    if (!pending.response.ok) throw await readError(pending.response);
+    let text = "";
+    let id: string | undefined;
+    let promptTokens: number | undefined;
+    let outputTokens: number | undefined;
+    let cacheRead: number | undefined;
+    for await (const event of readSse(pending.response)) {
+      const record = readJsonRecord(event.data);
+      throwProviderEventError(record);
+      if (typeof record.responseId === "string") id = record.responseId;
+      const candidates = record.candidates;
+      const first = Array.isArray(candidates) ? candidates[0] : undefined;
+      const content =
+        first && typeof first === "object" && "content" in first ? (first as { content?: unknown }).content : undefined;
+      const parts =
+        content && typeof content === "object" && "parts" in content
+          ? (content as { parts?: unknown }).parts
+          : undefined;
+      if (Array.isArray(parts)) {
+        const piece = parts
+          .map((part) => (part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string"
+            ? (part as { text: string }).text
+            : ""))
+          .filter(Boolean)
+          .join("\n");
+        if (piece) {
+          text += piece;
+          yield { type: "delta", text: piece };
+        }
+      }
+      const meta = record.usageMetadata;
+      if (meta && typeof meta === "object") {
+        const usage = meta as {
+          promptTokenCount?: unknown;
+          candidatesTokenCount?: unknown;
+          cachedContentTokenCount?: unknown;
+        };
+        if (typeof usage.promptTokenCount === "number") promptTokens = usage.promptTokenCount;
+        if (typeof usage.candidatesTokenCount === "number") outputTokens = usage.candidatesTokenCount;
+        if (typeof usage.cachedContentTokenCount === "number") cacheRead = usage.cachedContentTokenCount;
+      }
+    }
+    const usage: UsageUnits = {};
+    const gaps: string[] = [];
+    if (promptTokens === undefined) gaps.push("inputTokens");
+    else usage.inputTokens = promptTokens;
+    if (outputTokens === undefined) gaps.push("outputTokens");
+    else usage.outputTokens = outputTokens;
+    if (cacheRead !== undefined) usage.cacheReadTokens = cacheRead;
+    yield {
+      type: "done",
+      output: [{ type: "text", text }],
+      ...(id ? { providerRequestId: id } : {}),
+      latencyMs: Date.now() - started,
+      usage,
+      usageGaps: gaps,
+      metadata: { gemini: { endpoint: "streamGenerateContent" } },
+    };
+  } finally {
+    pending.release();
+  }
 }

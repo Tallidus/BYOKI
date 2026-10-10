@@ -30,7 +30,7 @@ describe("visitor error text", () => {
   });
 
   it("uses the category message and drops a raw reason", () => {
-    for (const category of ["invalid_key", "rate_limited", "unavailable", "unknown"] as const) {
+    for (const category of ["invalid_key", "rate_limited", "quota", "unavailable", "unknown"] as const) {
       const message = connectionTestMessage({ ok: false, category, reason: RAW });
       expect(message).toBe(UPSTREAM_ERROR_MESSAGES[category]);
       expect(message).not.toContain("sk-test");
@@ -43,6 +43,9 @@ describe("visitor error text", () => {
     expect(invalid).toBe(UPSTREAM_ERROR_MESSAGES.invalid_key);
     expect(invalid).not.toContain("req_test_leak_000");
     expect(messageForVisitor(new AIConnectionsError("RATE_LIMITED", RAW))).toBe(UPSTREAM_ERROR_MESSAGES.rate_limited);
+    expect(messageForVisitor(new AIConnectionsError("RATE_LIMITED", RAW, undefined, "quota"))).toBe(
+      UPSTREAM_ERROR_MESSAGES.quota,
+    );
     expect(messageForVisitor(new AIConnectionsError("UPSTREAM_UNAVAILABLE", RAW))).toBe(
       UPSTREAM_ERROR_MESSAGES.unavailable,
     );

@@ -8,6 +8,7 @@ import type {
   ProviderId,
   ProviderRequest,
   ProviderResult,
+  ProviderStreamEvent,
   UsageUnits,
 } from "./types.js";
 import { AVAILABILITY_CAVEAT } from "./types.js";
@@ -66,50 +67,74 @@ export function createMockAdapter(id: ProviderId, options: MockAdapterOptions = 
       return models;
     },
     async invoke(request: ProviderRequest): Promise<ProviderResult> {
-      if (options.failWith === "invalid_key") {
-        throw new AIConnectionsError("INVALID_KEY", "The provider rejected this key.");
-      }
-      if (options.failWith === "rate_limit") {
-        throw new AIConnectionsError("RATE_LIMITED", "The provider rate limit was reached.", "mock-req");
-      }
-      if (options.failWith === "unavailable") {
-        throw new AIConnectionsError("UPSTREAM_UNAVAILABLE", "The provider did not respond.", "mock-req");
-      }
-      if (options.failWith === "model_unavailable" || !models.some((model) => model.id === request.modelId)) {
-        throw new AIConnectionsError(
-          "MODEL_UNAVAILABLE",
-          "That model is not available for this account. Choose another model.",
-          "mock-req",
-        );
-      }
-      const text = request.input
-        .flatMap((message) => message.parts.filter((part) => part.type === "text").map((part) => part.text))
+      return mockResult(request, models, options);
+    },
+    async *invokeStream(request: ProviderRequest): AsyncGenerator<ProviderStreamEvent> {
+      const result = await mockResult(request, models, options);
+      const text = result.output
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
         .join("\n");
-      const imageCount = request.input
-        .flatMap((message) => message.parts)
-        .filter((part) => part.type === "image").length;
-      const usage = options.omitUsage
-        ? undefined
-        : (options.usage ?? {
-            inputTokens: 12,
-            outputTokens: 8,
-            imageCount: imageCount || undefined,
-          });
-      return {
-        status: "success",
-        output: [
-          {
-            type: "text",
-            text: `mock:${request.capability}:${text}`,
-          },
-        ],
-        providerRequestId: "mock-req",
-        latencyMs: options.latencyMs ?? 1,
-        ...(usage ? { usage } : {}),
-        usageGaps: options.omitUsage ? ["inputTokens", "outputTokens"] : [],
-        metadata: { mock: true },
+      const size = 4;
+      for (let index = 0; index < text.length; index += size) {
+        yield { type: "delta", text: text.slice(index, index + size) };
+      }
+      yield {
+        type: "done",
+        output: result.output,
+        ...(result.providerRequestId ? { providerRequestId: result.providerRequestId } : {}),
+        latencyMs: result.latencyMs,
+        ...(result.usage ? { usage: result.usage } : {}),
+        usageGaps: result.usageGaps,
+        ...(result.metadata ? { metadata: result.metadata } : {}),
       };
     },
+  };
+}
+
+function mockResult(request: ProviderRequest, models: ModelOption[], options: MockAdapterOptions): ProviderResult {
+  if (options.failWith === "invalid_key") {
+    throw new AIConnectionsError("INVALID_KEY", "The provider rejected this key.");
+  }
+  if (options.failWith === "rate_limit") {
+    throw new AIConnectionsError("RATE_LIMITED", "The provider rate limit was reached.", "mock-req");
+  }
+  if (options.failWith === "unavailable") {
+    throw new AIConnectionsError("UPSTREAM_UNAVAILABLE", "The provider did not respond.", "mock-req");
+  }
+  if (options.failWith === "model_unavailable" || !models.some((model) => model.id === request.modelId)) {
+    throw new AIConnectionsError(
+      "MODEL_UNAVAILABLE",
+      "That model is not available for this account. Choose another model.",
+      "mock-req",
+    );
+  }
+  const text = request.input
+    .flatMap((message) => message.parts.filter((part) => part.type === "text").map((part) => part.text))
+    .join("\n");
+  const imageCount = request.input
+    .flatMap((message) => message.parts)
+    .filter((part) => part.type === "image").length;
+  const usage = options.omitUsage
+    ? undefined
+    : (options.usage ?? {
+        inputTokens: 12,
+        outputTokens: 8,
+        imageCount: imageCount || undefined,
+      });
+  return {
+    status: "success",
+    output: [
+      {
+        type: "text",
+        text: `mock:${request.capability}:${text}`,
+      },
+    ],
+    providerRequestId: "mock-req",
+    latencyMs: options.latencyMs ?? 1,
+    ...(usage ? { usage } : {}),
+    usageGaps: options.omitUsage ? ["inputTokens", "outputTokens"] : [],
+    metadata: { mock: true },
   };
 }
 
