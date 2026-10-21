@@ -1,4 +1,5 @@
-import { AIConnectionsError, UPSTREAM_ERROR_MESSAGES } from "./errors.js";
+import { AIConnectionsError, TASK_UNSUPPORTED_MESSAGE, UPSTREAM_ERROR_MESSAGES } from "./errors.js";
+import { isModelId } from "./models.js";
 import { normalizeInput } from "./mock-adapter.js";
 import type {
   AIConnectionsConfig,
@@ -38,6 +39,7 @@ export type InvokeBody = {
   capability: Capability;
   input: InputMessage[];
   stream?: boolean;
+  temperature?: number;
 };
 
 export type InvokeSuccess = {
@@ -95,24 +97,18 @@ export function explainSelection(
     );
   }
   const adapter = adapters[selection.provider];
-  if (!adapter || !adapter.supportedCapabilities.includes(selection.capability)) {
-    return new AIConnectionsError(
-      "CAPABILITY_UNSUPPORTED",
-      `${selection.provider} does not support ${selection.capability}.`,
-    );
+  if (!adapter) {
+    return new AIConnectionsError("CAPABILITY_UNSUPPORTED", `No adapter is registered for ${selection.provider}.`);
+  }
+  if (!isModelId(selection.modelId)) {
+    return new AIConnectionsError("INVALID_CONFIG", "Choose a model.");
+  }
+  if (!adapter.supportedCapabilities.includes(selection.capability)) {
+    return new AIConnectionsError("MODEL_INCOMPATIBLE", TASK_UNSUPPORTED_MESSAGE);
   }
   const model = findCatalogModel(catalog, selection.provider, selection.modelId);
-  if (!model) {
-    return new AIConnectionsError(
-      "MODEL_UNAVAILABLE",
-      "That model is not in the catalog. Choose another model.",
-    );
-  }
-  if (!model.capabilities.includes(selection.capability)) {
-    return new AIConnectionsError(
-      "MODEL_INCOMPATIBLE",
-      `${selection.modelId} does not support ${selection.capability}.`,
-    );
+  if (model && !model.capabilities.includes(selection.capability)) {
+    return new AIConnectionsError("MODEL_INCOMPATIBLE", TASK_UNSUPPORTED_MESSAGE);
   }
   return null;
 }
@@ -147,6 +143,7 @@ function providerRequest(config: AIConnectionsConfig, body: InvokeBody, selectio
     input,
     timeoutMs: config.limits.requestTimeoutMs,
     ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+    ...(body.temperature !== undefined ? { temperature: body.temperature } : {}),
   };
 }
 

@@ -66,7 +66,7 @@ corepack pnpm pack:check
 
 ## Publishing
 
-The packages are versioned together at `0.1.0` and are licensed under MIT.
+The packages are versioned together at `0.2.0` and are licensed under MIT.
 
 `.github/workflows/publish.yml` publishes `packages/*` when a GitHub release is published. It installs with `--frozen-lockfile`. `pnpm publish` rewrites `workspace:*` dependencies, then calls `npm publish`. The job requests `id-token: write` and does not use a long-lived npm token. npm trusted publishing exchanges the GitHub Actions OIDC token for a short-lived credential and, for this public repository, attaches a provenance attestation (`--provenance`).
 

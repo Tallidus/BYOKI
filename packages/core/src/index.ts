@@ -1,6 +1,8 @@
 export {
   AIConnectionsError,
   MODEL_UNAVAILABLE_MESSAGE,
+  NON_RECOMMENDED_MODEL_WARNING,
+  TASK_UNSUPPORTED_MESSAGE,
   UPSTREAM_ERROR_MESSAGES,
   connectionTestCategory,
   connectionTestMessage,
@@ -11,6 +13,18 @@ export {
   scrubVisitorText,
 } from "./errors.js";
 export { defineAIConnections, isCapability, isProviderId } from "./config.js";
+export {
+  categorizeModel,
+  isModelId,
+  isRecommendedModel,
+  isTaskMismatchBody,
+  keyFingerprint,
+  mergeDiscoveredModels,
+  modelAckName,
+  partitionModels,
+  MODEL_ID_PATTERN,
+} from "./models.js";
+export type { ModelDiscovery, ModelListMetadata } from "./models.js";
 export type { AIConnectionsInput } from "./config.js";
 export { createMockAdapter, normalizeInput } from "./mock-adapter.js";
 export { createRouter, explainSelection, findCatalogModel } from "./router.js";
@@ -46,6 +60,7 @@ export type {
   LedgerOutcome,
   ModelOption,
   ProviderAdapter,
+  RecommendedModel,
   ProviderId,
   ProviderRequest,
   ProviderResult,

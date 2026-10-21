@@ -61,7 +61,7 @@ ByokiPart.image(mimeType: 'image/jpeg', data: base64Encode(bytes))
 
 `detectProvider` reads the prefix: `sk-ant-` is Anthropic, other `sk-` keys (including `sk-proj-`) are OpenAI, and `AIza` is Gemini. Anything else is not sent.
 
-`models()` returns the reviewed catalog. Pass a chosen id to `invoke` or `invokeStream`.
+`models()` returns the reviewed catalog. `discoverModels(apiKey)` lists models with that key, tags them (`chat`, `vision`, `image`, `embedding`, `audio`), caches the list on the client, and returns the catalog with `fallback: true` when the provider list fails. Pass a chosen id to `invoke` or `invokeStream`. A model that cannot do the request throws `ByokiException` with `This model can't do that task. Choose a model that supports it.`
 
 ## Settings widget
 
@@ -71,7 +71,9 @@ ByokiSettings()
 
 That builds a client and a `SecureByokiKeyStore`. The field is obscured. The widget detects the provider, enables **Test and save** once the prefix matches and the trimmed key is at least 8 characters, tests the key, stores it, clears the field, and offers a model picker. **Remove key** deletes the local copy. It does not revoke the key at the provider.
 
-Pass `client` and `store` in tests. The default store uses `flutter_secure_storage` with names `byoki.v1.key.<provider>` and `byoki.v1.model.<provider>.<capability>`. The API key is never the storage name.
+Pass `recommended` and `defaultModels` to label tested models as **Recommended** and list the rest under **All available models**. A custom model id field covers an id the list did not return. Choosing a non-recommended model shows the spec warning and waits for **Use this model**. That acknowledgment is stored at `byoki.v1.ack.<provider>.<modelId>`.
+
+Pass `client` and `store` in tests. The default store uses `flutter_secure_storage` with names `byoki.v1.key.<provider>`, `byoki.v1.model.<provider>.<capability>`, and `byoki.v1.ack.<provider>.<modelId>`. The API key is never the storage name.
 
 ## Storage rules
 

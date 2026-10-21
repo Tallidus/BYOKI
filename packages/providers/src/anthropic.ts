@@ -1,6 +1,7 @@
 import {
   AVAILABILITY_CAVEAT,
-  type Capability,
+  categorizeModel,
+  isModelId,
   type ModelOption,
   type ProviderAdapter,
   type ProviderRequest,
@@ -10,15 +11,16 @@ import {
 } from "@byoki/core";
 import { CATALOG_UPDATED_AT } from "./catalog.js";
 import {
+  errorFromUpstream,
   failedConnectionTest,
   providerFetch,
   providerStream,
-  readError,
   readJsonRecord,
   readSse,
   throwProviderEventError,
   type FetchLike,
 } from "./http.js";
+import { initialAttempt, nextAttempt, type ParamAttempt } from "./retry.js";
 
 const BASE = "https://api.anthropic.com/v1";
 const VERSION = "2023-06-01";
@@ -56,34 +58,42 @@ async function testKey(fetchImpl: FetchLike, key: string) {
 }
 
 async function listModels(fetchImpl: FetchLike, key: string): Promise<ModelOption[]> {
-  const response = await providerFetch(
-    fetchImpl,
-    `${BASE}/models?limit=100`,
-    { method: "GET", headers: headers(key) },
-    15_000,
-  );
-  if (!response.ok) throw await readError(response);
-  const body = (await response.json()) as {
-    data?: Array<{ id?: string; display_name?: string; capabilities?: { image_input?: { supported?: boolean } } }>;
-  };
-  return (body.data ?? [])
-    .filter((item) => typeof item.id === "string")
-    .map((item) => {
-      const capabilities: Capability[] = ["chat"];
-      if (item.capabilities?.image_input?.supported) capabilities.push("vision");
-      return {
-        id: item.id!,
-        provider: "anthropic" as const,
-        capabilities,
-        displayName: item.display_name || item.id!,
+  const models: ModelOption[] = [];
+  let after: string | undefined;
+  for (let page = 0; page < 10; page += 1) {
+    const url = new URL(`${BASE}/models`);
+    url.searchParams.set("limit", "100");
+    if (after) url.searchParams.set("after_id", after);
+    const response = await providerFetch(fetchImpl, url.toString(), { method: "GET", headers: headers(key) }, 15_000);
+    if (!response.ok) throw errorFromUpstream(response.status, await response.text());
+    const body = (await response.json()) as {
+      has_more?: boolean;
+      last_id?: string;
+      data?: Array<{ id?: string; display_name?: string; capabilities?: { image_input?: { supported?: boolean } } }>;
+    };
+    for (const item of body.data ?? []) {
+      if (typeof item.id !== "string" || !isModelId(item.id)) continue;
+      const imageInput = item.capabilities?.image_input?.supported;
+      models.push({
+        id: item.id,
+        provider: "anthropic",
+        capabilities: categorizeModel("anthropic", item.id, {
+          displayName: item.display_name,
+          ...(typeof imageInput === "boolean" ? { imageInput } : {}),
+        }),
+        displayName: item.display_name || item.id,
         catalogUpdatedAt: CATALOG_UPDATED_AT,
-        source: "discovered" as const,
+        source: "discovered",
         availabilityCaveat: AVAILABILITY_CAVEAT,
-      };
-    });
+      });
+    }
+    if (!body.has_more || typeof body.last_id !== "string" || body.last_id === after) break;
+    after = body.last_id;
+  }
+  return models;
 }
 
-function messageBody(request: ProviderRequest, stream: boolean): string {
+function messageBody(request: ProviderRequest, stream: boolean, attempt: ParamAttempt): string {
   const system = request.input
     .filter((message) => message.role === "system")
     .flatMap((message) => message.parts.filter((part) => part.type === "text").map((part) => part.text))
@@ -100,26 +110,45 @@ function messageBody(request: ProviderRequest, stream: boolean): string {
     }));
   return JSON.stringify({
     model: request.modelId,
-    max_tokens: request.maxOutputTokens ?? 1024,
+    ...(attempt.omit.has("max_tokens") ? {} : { max_tokens: request.maxOutputTokens ?? 1024 }),
+    ...(request.temperature !== undefined && !attempt.omit.has("temperature")
+      ? { temperature: request.temperature }
+      : {}),
     ...(system ? { system } : {}),
     messages,
     ...(stream ? { stream: true } : {}),
   });
 }
 
+async function postMessages(fetchImpl: FetchLike, request: ProviderRequest, key: string, stream: boolean): Promise<Response> {
+  let attempt = initialAttempt();
+  let lastText = "";
+  let last: Response | undefined;
+  for (let tryNumber = 0; tryNumber < 3; tryNumber += 1) {
+    const response = await providerFetch(
+      fetchImpl,
+      `${BASE}/messages`,
+      {
+        method: "POST",
+        headers: { ...headers(key), "content-type": "application/json" },
+        body: messageBody(request, stream, attempt),
+      },
+      request.timeoutMs,
+    );
+    if (response.ok) return response;
+    last = response;
+    lastText = await response.text();
+    const retry = nextAttempt(attempt, lastText);
+    if (!retry) break;
+    attempt = retry;
+  }
+  const requestId = last?.headers.get("x-request-id") ?? last?.headers.get("request-id") ?? undefined;
+  throw errorFromUpstream(last?.status ?? 0, lastText, requestId);
+}
+
 async function invoke(fetchImpl: FetchLike, request: ProviderRequest, key: string): Promise<ProviderResult> {
   const started = Date.now();
-  const response = await providerFetch(
-    fetchImpl,
-    `${BASE}/messages`,
-    {
-      method: "POST",
-      headers: { ...headers(key), "content-type": "application/json" },
-      body: messageBody(request, false),
-    },
-    request.timeoutMs,
-  );
-  if (!response.ok) throw await readError(response);
+  const response = await postMessages(fetchImpl, request, key, false);
   const body = (await response.json()) as {
     id?: string;
     content?: Array<{ type?: string; text?: string }>;
@@ -143,18 +172,8 @@ async function* invokeStream(
   key: string,
 ): AsyncGenerator<ProviderStreamEvent> {
   const started = Date.now();
-  const pending = await providerStream(
-    fetchImpl,
-    `${BASE}/messages`,
-    {
-      method: "POST",
-      headers: { ...headers(key), "content-type": "application/json" },
-      body: messageBody(request, true),
-    },
-    request.timeoutMs,
-  );
+  const pending = await openStream(fetchImpl, request, key);
   try {
-    if (!pending.response.ok) throw await readError(pending.response);
     let text = "";
     let id: string | undefined;
     let inputTokens: number | undefined;
@@ -210,6 +229,34 @@ async function* invokeStream(
   } finally {
     pending.release();
   }
+}
+
+async function openStream(fetchImpl: FetchLike, request: ProviderRequest, key: string) {
+  let attempt = initialAttempt();
+  let lastText = "";
+  let lastStatus = 0;
+  let lastId: string | undefined;
+  for (let tryNumber = 0; tryNumber < 3; tryNumber += 1) {
+    const pending = await providerStream(
+      fetchImpl,
+      `${BASE}/messages`,
+      {
+        method: "POST",
+        headers: { ...headers(key), "content-type": "application/json" },
+        body: messageBody(request, true, attempt),
+      },
+      request.timeoutMs,
+    );
+    if (pending.response.ok) return pending;
+    lastStatus = pending.response.status;
+    lastId = pending.response.headers.get("x-request-id") ?? pending.response.headers.get("request-id") ?? undefined;
+    lastText = await pending.response.text();
+    pending.release();
+    const retry = nextAttempt(attempt, lastText);
+    if (!retry) break;
+    attempt = retry;
+  }
+  throw errorFromUpstream(lastStatus, lastText, lastId);
 }
 
 function finishAnthropic(

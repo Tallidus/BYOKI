@@ -23,6 +23,12 @@ const config = defineAIConnections({
       providers: ["openai", "anthropic", "gemini"],
       userCanChooseModel: true,
       required: true,
+      recommendedModels: [
+        { provider: "openai", modelId: "gpt-5.6-terra" },
+        { provider: "anthropic", modelId: "claude-sonnet-5" },
+        { provider: "gemini", modelId: "gemini-3.5-flash" },
+      ],
+      defaultModel: { provider: "openai", modelId: "gpt-5.6-terra" },
     },
     vision: {
       description: "Sends a prompt and an image with the provider key connected for this session.",

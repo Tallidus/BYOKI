@@ -1,7 +1,17 @@
 export { createDirectClient, detectProvider } from "./direct.js";
 export type { DirectClient, DirectInvokeInput, DirectInvokeResult, DirectKeyTest, DirectStreamEvent } from "./direct.js";
 export {
+  categorizeModel,
+  isModelId,
+  isRecommendedModel,
+  modelAckName,
+  partitionModels,
+} from "./models.js";
+export type { ModelDiscovery, ModelListMetadata } from "./models.js";
+export {
   MODEL_UNAVAILABLE_MESSAGE,
+  NON_RECOMMENDED_MODEL_WARNING,
+  TASK_UNSUPPORTED_MESSAGE,
   UPSTREAM_ERROR_MESSAGES,
   connectionTestCategory,
   connectionTestMessage,
@@ -22,6 +32,7 @@ export type {
   ErrorCode,
   ModelOption,
   ProviderId,
+  RecommendedModel,
   Selection,
   UpstreamErrorCategory,
   UsageUnits,

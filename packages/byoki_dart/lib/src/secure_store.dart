@@ -1,6 +1,7 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'detect.dart';
+import 'discover.dart';
 import 'storage.dart';
 
 /// Small box so tests can record storage names without the platform plugin.
@@ -66,8 +67,21 @@ class SecureByokiKeyStore implements ByokiKeyStore {
   @override
   Future<void> deleteModels(String provider) async {
     _check(provider);
-    await _box.delete(byokiModelName(provider, 'chat'));
-    await _box.delete(byokiModelName(provider, 'vision'));
+    for (final capability in byokiCapabilities) {
+      await _box.delete(byokiModelName(provider, capability));
+    }
+  }
+
+  @override
+  Future<void> saveAck(String provider, String modelId) {
+    _check(provider);
+    return _box.write(byokiAckName(provider, modelId), '1');
+  }
+
+  @override
+  Future<bool> hasAck(String provider, String modelId) async {
+    _check(provider);
+    return await _box.read(byokiAckName(provider, modelId)) == '1';
   }
 }
 

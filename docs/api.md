@@ -12,7 +12,7 @@ On-device clients call the provider directly. That contract is [INTEGRATING.md](
 | PUT | `/api/ai/connections/:provider` | Create or replace a key for the signed-in user. Body: `{ "apiKey": "..." }`. |
 | DELETE | `/api/ai/connections/:provider` | Delete the stored connection for this app. |
 | POST | `/api/ai/connections/:provider/test` | Test a submitted or stored key. Rate limited. A failed test returns a fixed `reason` and `category` (`invalid_key`, `rate_limited`, `quota`, `unavailable`, or `unknown`). The body does not include provider error text. |
-| GET | `/api/ai/models?capability=chat` | Allowed compatible models. Add `discover=1` to refresh from the provider. |
+| GET | `/api/ai/models?capability=chat` | Models for that capability. `discover=1` lists from the provider and falls back to the catalog if listing fails. Selections may be a discovered or custom model id. |
 | PUT | `/api/ai/selections/:capability` | Save an allowed provider and model. Body: `{ "provider": "openai", "modelId": "..." }`. |
 | GET | `/api/ai/usage?from=...&to=...` | Observed ledger summary for the signed-in user. |
 | POST | `/api/ai/invoke` | Send a chat or vision prompt. Omit `stream` for JSON. `stream: true` responds with `text/event-stream`. |

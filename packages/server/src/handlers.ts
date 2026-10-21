@@ -178,6 +178,11 @@ function observedSpend(rows: UsageRecord[]): { usd: number; hasUnknown: boolean 
 export function createHandlers(deps: HandlerDeps) {
   const maxBody = deps.maxBodyBytes ?? KEY_BODY_LIMIT;
 
+  function withCatalogName(model: { provider: ProviderId; modelId: string }) {
+    const known = deps.catalog.find((item) => item.provider === model.provider && item.id === model.modelId);
+    return known ? { provider: model.provider, modelId: model.modelId, displayName: known.displayName } : model;
+  }
+
   async function getConnections(auth: AuthContext): Promise<Response> {
     const scope = requireUser(auth, false);
     const selections = await deps.selections.list(scope);
@@ -208,6 +213,8 @@ export function createHandlers(deps: HandlerDeps) {
         required: policy.required,
         userCanChooseModel: policy.userCanChooseModel,
         providers: policy.providers,
+        recommendedModels: (policy.recommendedModels ?? []).map(withCatalogName),
+        defaultModel: policy.defaultModel ? withCatalogName(policy.defaultModel) : null,
         selection,
         selectionIssue: issue ? { code: issue.code, message: issue.message } : null,
       };
@@ -311,18 +318,32 @@ export function createHandlers(deps: HandlerDeps) {
     for (const provider of policy.providers) {
       if (await deps.credentials.has(scope, provider)) connected.add(provider);
     }
-    const models = deps.catalog.filter(
+    const catalogModels = deps.catalog.filter(
       (model) => model.capabilities.includes(capabilityRaw) && connected.has(model.provider),
     );
+    const models = discover ? [] : [...catalogModels];
     const warnings: string[] = [];
+    const useCatalog = (provider: ProviderId) => {
+      for (const model of catalogModels) {
+        if (model.provider !== provider) continue;
+        if (!models.some((existing) => existing.provider === model.provider && existing.id === model.id)) {
+          models.push(model);
+        }
+      }
+    };
     if (discover) {
       for (const provider of policy.providers) {
+        if (!connected.has(provider)) continue;
         if (!deps.rateLimit.take(`${scope.tenantId}:${scope.userId}:discover:${provider}`)) {
           warnings.push(`Model refresh for ${provider} was rate limited.`);
+          useCatalog(provider);
           continue;
         }
         const adapter = deps.adapters[provider];
-        if (!adapter || !(await deps.credentials.has(scope, provider))) continue;
+        if (!adapter) {
+          useCatalog(provider);
+          continue;
+        }
         const key = await deps.credentials.get(scope, provider);
         if (!key) continue;
         try {
@@ -335,6 +356,7 @@ export function createHandlers(deps: HandlerDeps) {
           }
         } catch (error) {
           warnings.push(error instanceof AIConnectionsError ? messageForVisitor(error) : "Model refresh failed.");
+          useCatalog(provider);
         }
       }
     }
@@ -415,10 +437,20 @@ export function createHandlers(deps: HandlerDeps) {
     }
     const body = parseInvokeBody(await readBody(request, deps.maxInvokeBodyBytes ?? INVOKE_BODY_LIMIT));
     if (body.stream !== true) {
-      const result = await deps.invoke(scope, { capability: body.capability, input: body.input, stream: false });
+      const result = await deps.invoke(scope, {
+        capability: body.capability,
+        input: body.input,
+        stream: false,
+        ...(body.temperature !== undefined ? { temperature: body.temperature } : {}),
+      });
       return json(200, { ok: true, data: result });
     }
-    const iterator = deps.invokeStream(scope, { capability: body.capability, input: body.input, stream: true })[
+    const iterator = deps.invokeStream(scope, {
+      capability: body.capability,
+      input: body.input,
+      stream: true,
+      ...(body.temperature !== undefined ? { temperature: body.temperature } : {}),
+    })[
       Symbol.asyncIterator
     ]();
     let first: IteratorResult<InvokeStreamEvent>;
@@ -542,7 +574,7 @@ function parseInvokeBody(value: unknown): InvokeBody {
   }
   const body = value as Record<string, unknown>;
   if (typeof body.capability !== "string" || !isCapability(body.capability)) {
-    throw new AIConnectionsError("INVALID_CONFIG", "Choose chat or vision.");
+    throw new AIConnectionsError("INVALID_CONFIG", "Choose a supported capability.");
   }
   if (!Array.isArray(body.input) || body.input.length === 0) {
     throw new AIConnectionsError("INVALID_CONFIG", "Include a message.");
@@ -553,11 +585,15 @@ function parseInvokeBody(value: unknown): InvokeBody {
   if (body.stream !== undefined && typeof body.stream !== "boolean") {
     throw new AIConnectionsError("INVALID_CONFIG", "stream must be a boolean.");
   }
+  if (body.temperature !== undefined && (typeof body.temperature !== "number" || !Number.isFinite(body.temperature))) {
+    throw new AIConnectionsError("INVALID_CONFIG", "Temperature must be a finite number.");
+  }
   const input = body.input.map((item) => parseMessage(item));
   return {
     capability: body.capability,
     input,
     ...(typeof body.stream === "boolean" ? { stream: body.stream } : {}),
+    ...(typeof body.temperature === "number" ? { temperature: body.temperature } : {}),
   };
 }
 

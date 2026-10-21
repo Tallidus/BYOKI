@@ -24,7 +24,7 @@
         "capabilities": {
           "type": "array",
           "minItems": 1,
-          "items": { "enum": ["chat", "vision"] }
+          "items": { "enum": ["chat", "vision", "image", "embedding", "audio"] }
         }
       }
     }

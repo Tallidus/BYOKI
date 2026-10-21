@@ -111,7 +111,7 @@ describe("provider adapters", () => {
 
   it("maps Gemini generateContent without putting the key in the URL", async () => {
     const fetchImpl = mockFetch((url) => {
-      if (url.endsWith("/models")) {
+      if (url.includes("/models") && !url.includes("generateContent")) {
         return {
           status: 200,
           body: {
@@ -133,7 +133,9 @@ describe("provider adapters", () => {
     });
     const adapter = createGeminiAdapter(fetchImpl);
     const models = await adapter.listModels("AIza-test-key");
-    expect(models.map((model) => model.id)).toEqual(["gemini-3.5-flash"]);
+    expect(models.map((model) => model.id)).toEqual(["gemini-3.5-flash", "gemini-3.1-flash-image"]);
+    expect(models[0]?.capabilities).toEqual(expect.arrayContaining(["chat", "vision"]));
+    expect(models.find((model) => model.id === "gemini-3.1-flash-image")?.capabilities).toContain("image");
     const result = await adapter.invoke({ ...request, modelId: "gemini-3.5-flash" }, "AIza-test-key");
     expect(result.output[0]).toMatchObject({ text: "A photo of a dashboard." });
     expect(result.usageGaps).not.toContain("inputTokens");
@@ -262,5 +264,72 @@ describe("provider streaming", () => {
     expect(fetchImpl.calls[0]?.url).toContain(":streamGenerateContent?alt=sse");
     expect(fetchImpl.calls[0]?.url).not.toContain(secret);
     expect((fetchImpl.calls[0]?.init.headers as Record<string, string>)["x-goog-api-key"]).toBe(secret);
+  });
+});
+
+describe("model list categories and parameter retry", () => {
+  it("keeps every OpenAI model the key can access and tags it", async () => {
+    const fetchImpl = mockFetch(() => ({
+      status: 200,
+      body: {
+        data: [
+          { id: "gpt-5.6-terra" },
+          { id: "text-embedding-3-small" },
+          { id: "whisper-1" },
+          { id: "dall-e-3" },
+          { id: "tts-1" },
+        ],
+      },
+    }));
+    const models = await createOpenAIAdapter(fetchImpl).listModels("sk-test");
+    expect(models.find((model) => model.id === "gpt-5.6-terra")?.capabilities).toEqual(expect.arrayContaining(["chat", "vision"]));
+    expect(models.find((model) => model.id === "text-embedding-3-small")?.capabilities).toEqual(["embedding"]);
+    expect(models.find((model) => model.id === "whisper-1")?.capabilities).toEqual(["audio"]);
+    expect(models.find((model) => model.id === "dall-e-3")?.capabilities).toEqual(["image"]);
+    expect(models.find((model) => model.id === "tts-1")?.capabilities).toEqual(["audio"]);
+  });
+
+  it("retries without an unsupported temperature and swaps the token field", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchImpl = mockFetch((_url, init) => {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      bodies.push(body);
+      if (body.temperature !== undefined) {
+        return {
+          status: 400,
+          body: { error: { code: "unsupported_parameter", param: "temperature", message: "Unsupported parameter: 'temperature' is not supported with this model. key sk-secret" } },
+        };
+      }
+      if (body.max_completion_tokens !== undefined) {
+        return {
+          status: 400,
+          body: { error: { code: "unsupported_parameter", param: "max_completion_tokens", message: "Use 'max_tokens' instead." } },
+        };
+      }
+      return { status: 200, body: { choices: [{ message: { content: "ok" } }] } };
+    });
+    const result = await createOpenAIAdapter(fetchImpl).invoke(
+      { ...request, capability: "chat", modelId: "o1", maxOutputTokens: 16, temperature: 0.2 },
+      "sk-test",
+    );
+    expect(result.output[0]).toEqual({ type: "text", text: "ok" });
+    expect(bodies[0]).toMatchObject({ temperature: 0.2, max_completion_tokens: 16 });
+    expect(bodies.at(-1)).not.toHaveProperty("temperature");
+    expect(bodies.at(-1)).toMatchObject({ max_tokens: 16 });
+    expect(JSON.stringify(result)).not.toContain("sk-secret");
+  });
+
+  it("says when a model cannot do the task and does not repeat the provider body", async () => {
+    const secret = "sk-supersecretkeyvalue";
+    const adapter = createOpenAIAdapter(
+      mockFetch(() => ({
+        status: 400,
+        body: { error: { message: `The model does not support image input. key ${secret}`, type: "invalid_request_error" } },
+      })),
+    );
+    await expect(adapter.invoke(request, secret)).rejects.toMatchObject({
+      code: "MODEL_INCOMPATIBLE",
+      message: "This model can't do that task. Choose a model that supports it.",
+    });
   });
 });

@@ -33,11 +33,15 @@ The caller passes messages with role `user`, `assistant`, or `system`. Each mess
 
 Default timeouts are 15 seconds for a key test and 60 seconds for invoke.
 
-OpenAI maps each message to `messages[].content`. Text parts stay `{ type: "text", text }`. Image parts become `{ type: "image_url", image_url: { url: "data:<mime>;base64,<data>" } }`. `maxOutputTokens` maps to `max_completion_tokens`.
+OpenAI maps each message to `messages[].content`. Text parts stay `{ type: "text", text }`. Image parts become `{ type: "image_url", image_url: { url: "data:<mime>;base64,<data>" } }`. `maxOutputTokens` maps to `max_completion_tokens`. An optional `temperature` is sent only when the caller set one.
 
-Anthropic pulls system text into the top-level `system` string. Remaining messages use `user` or `assistant`. Image parts become `{ type: "image", source: { type: "base64", media_type, data } }`. `max_tokens` defaults to 1024 when the caller omits a limit.
+Anthropic pulls system text into the top-level `system` string. Remaining messages use `user` or `assistant`. Image parts become `{ type: "image", source: { type: "base64", media_type, data } }`. `max_tokens` defaults to 1024 when the caller omits a limit. An optional `temperature` is sent only when the caller set one.
 
-Gemini puts system text in `systemInstruction`. `assistant` is sent as role `model`. Image parts become `{ inline_data: { mime_type, data } }`. `maxOutputTokens` maps to `generationConfig.maxOutputTokens`.
+Gemini puts system text in `systemInstruction`. `assistant` is sent as role `model`. Image parts become `{ inline_data: { mime_type, data } }`. `maxOutputTokens` maps to `generationConfig.maxOutputTokens`. An optional `temperature` is sent on `generationConfig` only when the caller set one.
+
+If the provider rejects a parameter as unsupported (`unsupported_parameter`, `unsupported_value`, or an equivalent invalid-argument name such as `temperature`, `max_tokens`, `max_completion_tokens`, or `maxOutputTokens`), the client retries that call once without the parameter. `max_completion_tokens` and `max_tokens` are swapped for each other before either is dropped. The retry does not copy the provider message. At most three attempts are made. A failure after that uses the error table below.
+
+`invoke` and `invokeStream` perform chat and vision text generation. A call whose capability is `image`, `embedding`, or `audio`, or whose known model does not include the requested capability, fails before the provider is called. The message is `This model can't do that task. Choose a model that supports it.` The same sentence is used when the provider says the model cannot do the task. The provider body is not shown.
 
 ## Responses
 
@@ -69,12 +73,58 @@ A key test is the provider's model-list GET. It does not generate text. Success 
 
 ## Model catalog
 
-`spec/catalog.json` is the reviewed list. Every current row supports `chat` and `vision`. A listed model can still be disabled on a particular account. Clients may show the catalog without a network call. They must not invent prices.
+`spec/catalog.json` is the developer's reviewed list. Every current row supports `chat` and `vision`. A listed model can still be disabled on a particular account. Clients may show the catalog without a network call. They must not invent prices.
+
+An app may also declare `recommendedModels` for each capability it uses, and a `defaultModel`. The default is the first recommended model when the app does not set one. The default has to be one of the recommended models. Recommended providers have to be in that capability's provider list.
+
+## Model discovery
+
+With the user's key, the client lists models from the provider and does not send the key anywhere else:
+
+| Provider | List |
+| --- | --- |
+| `openai` | `GET https://api.openai.com/v1/models` |
+| `anthropic` | `GET https://api.anthropic.com/v1/models` (page with `limit` and `after_id`, at most 10 pages) |
+| `gemini` | `GET https://generativelanguage.googleapis.com/v1beta/models` (page with `pageSize` and `pageToken`, at most 10 pages) |
+
+The list is cached for the life of the client instance, keyed by provider and a fingerprint of the key. The raw key is not stored in the cache. A caller may force a refresh. If the list fails because of CORS, the network, or permissions, the client returns the developer catalog for that provider and marks the result as a fallback. It does not throw, and it does not post the key to an application server.
+
+Each returned model is tagged with one or more of `chat`, `vision`, `image`, `embedding`, and `audio`. Apps filter to the capabilities they use. Dungeon Assistant, for example, can ask for `chat` for stat blocks and `image` for artwork. Provider metadata is used when the list includes it. Otherwise the id is classified by name:
+
+| Signal | Capability |
+| --- | --- |
+| Anthropic `capabilities.image_input.supported: true` | `vision`. An explicit `false` does not add `vision`. |
+| Gemini `supportedGenerationMethods` containing `generateContent` | `chat`. Gemini chat models also get `vision` unless image input was explicitly disabled. |
+| Gemini method containing `embed` | `embedding` |
+| Gemini method containing `bidiGenerate` | `audio` |
+| Id contains `embed` | `embedding` |
+| Id matches `whisper`, `transcribe`, or `tts-1` / `tts-` | `audio` only |
+| Id contains `audio`, `speech`, `realtime`, or ends in `-tts` | `audio`, and `chat` when the id is also a chat family |
+| Id matches `dall-e`, `dalle`, `gpt-image`, `imagen`, `flash-image`, `image-preview`, or `-image` | `image`. Gemini image models that also support `generateContent` keep `chat`. |
+| OpenAI id matching `gpt-` (except `gpt-image`), `o` plus a digit, or `chatgpt-` | `chat`. `gpt-4o`, `gpt-4.1`, `gpt-4-turbo`, `gpt-5`, `o3` and later, and `chatgpt-4o` also get `vision`. |
+| Anthropic id starting with `claude` | `chat`, and `vision` when image input was not explicitly disabled |
+| Anything else | no capability tag. It can still be chosen with a custom model id. |
+
+A model id has to match `^[A-Za-z0-9._:-]+$`. Ids that do not match are dropped from the list.
+
+When the same id is in the developer catalog, the catalog display name is kept and the capability tags are the union of both lists.
+
+## Choosing a model
+
+Settings show recommended models first, under the label `Recommended`. The other models for that capability are under `All available models`. A custom model id field accepts an id the list did not return.
+
+Selecting a model that is not in the app's recommended list, including a custom id, shows this warning and does not save until the user acknowledges it:
+
+> This model isn't recommended for this app. It may produce unexpected results, and you're responsible for its output.
+
+The acknowledgment is stored per model at `byoki.v1.ack.{provider}.{modelId}`. It is not a secret. A later selection of that same model does not ask again. The selected model id is stored at `byoki.v1.model.{provider}.{capability}`. Both stay on the device. If the app declared no recommended models, choosing a listed model does not warn. A custom id still warns.
+
+`invoke` uses the model id the user selected.
 
 ## Storage
 
 - Save a key only in platform secure storage: the OS keychain, Android EncryptedSharedPreferences, `flutter_secure_storage`, or an equivalent.
-- Storage names are `byoki.v1.key.{provider}` and `byoki.v1.model.{provider}.{capability}`. Never use the API key as the storage key.
+- Storage names are `byoki.v1.key.{provider}`, `byoki.v1.model.{provider}.{capability}`, and `byoki.v1.ack.{provider}.{modelId}`. Never use the API key as the storage key.
 - Do not write the key to `localStorage`, `SharedPreferences`, logs, analytics, crash reports, URLs, or screenshots.
 - Model ids are not secrets.
 - After a successful test and save, clear the text field and do not show the key again.

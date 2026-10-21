@@ -1,5 +1,6 @@
 import {
   AIConnectionsError,
+  TASK_UNSUPPORTED_MESSAGE,
   UPSTREAM_ERROR_MESSAGES,
   connectionTestCategory,
   connectionTestMessage,
@@ -8,6 +9,7 @@ import {
   messageForVisitor,
 } from "./errors.js";
 import { normalizeInput } from "./mock-adapter.js";
+import { isModelId, keyFingerprint, mergeDiscoveredModels, type ModelDiscovery } from "./models.js";
 import type {
   Capability,
   InputMessage,
@@ -24,7 +26,6 @@ export const MAX_DIRECT_MESSAGES = 32;
 export const MAX_DIRECT_PARTS = 8;
 
 const IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-const MODEL_ID = /^[A-Za-z0-9._:-]+$/;
 
 const LOCAL_MESSAGES = {
   emptyKey: "Enter a provider API key.",
@@ -49,6 +50,7 @@ export type DirectInvokeInput = {
   capability?: Capability;
   input: InputMessage[];
   maxOutputTokens?: number;
+  temperature?: number;
   timeoutMs?: number;
 };
 
@@ -64,6 +66,11 @@ export type DirectStreamEvent = { type: "delta"; text: string } | { type: "done"
 export type DirectClient = {
   detectProvider(apiKey: string): ProviderId | null;
   models(filter?: { provider?: ProviderId; capability?: Capability }): ModelOption[];
+  /**
+   * Lists models with the user's key. Successful lists are cached for this client
+   * instance. A network, CORS, or permission failure returns the developer catalog.
+   */
+  discoverModels(apiKey: string, options?: { capability?: Capability; refresh?: boolean }): Promise<ModelDiscovery>;
   testKey(apiKey: string): Promise<DirectKeyTest>;
   invoke(input: DirectInvokeInput): Promise<DirectInvokeResult>;
   invokeStream(input: DirectInvokeInput): AsyncIterable<DirectStreamEvent>;
@@ -90,26 +97,85 @@ export function detectProvider(apiKey: string): ProviderId | null {
  * Calls the provider HTTPS API from this process. It does not store the key,
  * log it, or attach provider metadata to the result.
  */
+type DiscoveryCache = {
+  fingerprint: string;
+  models: ModelOption[];
+  fallback: boolean;
+};
+
 export function createDirectClient(deps: DirectClientDeps): DirectClient {
+  const cache = new Map<ProviderId, DiscoveryCache>();
+
+  function knownModel(provider: ProviderId, modelId: string): ModelOption | undefined {
+    const cached = cache.get(provider)?.models.find((model) => model.id === modelId);
+    if (cached) return cached;
+    return deps.catalog.find((model) => model.provider === provider && model.id === modelId);
+  }
+
   return {
     detectProvider,
     models(filter) {
-      return deps.catalog.filter((model) => {
-        if (filter?.provider && model.provider !== filter.provider) return false;
-        if (filter?.capability && !model.capabilities.includes(filter.capability)) return false;
-        return true;
-      });
+      return filterModels(deps.catalog, filter);
+    },
+    discoverModels(apiKey, options) {
+      return discoverModels(deps, cache, apiKey, options);
     },
     testKey(apiKey) {
       return testKey(deps, apiKey);
     },
     invoke(input) {
-      return invoke(deps, input);
+      return invoke(deps, input, knownModel);
     },
     invokeStream(input) {
-      return invokeStream(deps, input);
+      return invokeStream(deps, input, knownModel);
     },
   };
+}
+
+function filterModels(models: ModelOption[], filter?: { provider?: ProviderId; capability?: Capability }): ModelOption[] {
+  return models.filter((model) => {
+    if (filter?.provider && model.provider !== filter.provider) return false;
+    if (filter?.capability && !model.capabilities.includes(filter.capability)) return false;
+    return true;
+  });
+}
+
+async function discoverModels(
+  deps: DirectClientDeps,
+  cache: Map<ProviderId, DiscoveryCache>,
+  apiKey: string,
+  options?: { capability?: Capability; refresh?: boolean },
+): Promise<ModelDiscovery> {
+  const key = apiKey.trim();
+  const provider = detectProvider(key);
+  if (!key || !provider) return { models: [], source: "catalog", fallback: true };
+  const fingerprint = keyFingerprint(key);
+  const cached = cache.get(provider);
+  if (!options?.refresh && cached && cached.fingerprint === fingerprint) {
+    return {
+      models: filterModels(cached.models, { provider, capability: options?.capability }),
+      source: cached.fallback ? "catalog" : "discovered",
+      fallback: cached.fallback,
+    };
+  }
+  const catalog = deps.catalog.filter((model) => model.provider === provider);
+  const adapter = deps.adapters[provider];
+  if (!adapter) {
+    cache.set(provider, { fingerprint, models: catalog, fallback: true });
+    return { models: filterModels(catalog, { capability: options?.capability }), source: "catalog", fallback: true };
+  }
+  try {
+    const listed = mergeDiscoveredModels(await adapter.listModels(key), catalog);
+    cache.set(provider, { fingerprint, models: listed, fallback: false });
+    return {
+      models: filterModels(listed, { capability: options?.capability }),
+      source: "discovered",
+      fallback: false,
+    };
+  } catch {
+    cache.set(provider, { fingerprint, models: catalog, fallback: true });
+    return { models: filterModels(catalog, { capability: options?.capability }), source: "catalog", fallback: true };
+  }
 }
 
 async function testKey(deps: DirectClientDeps, apiKey: string): Promise<DirectKeyTest> {
@@ -134,8 +200,12 @@ async function testKey(deps: DirectClientDeps, apiKey: string): Promise<DirectKe
   }
 }
 
-async function invoke(deps: DirectClientDeps, input: DirectInvokeInput): Promise<DirectInvokeResult> {
-  const prepared = prepare(deps, input);
+async function invoke(
+  deps: DirectClientDeps,
+  input: DirectInvokeInput,
+  knownModel: (provider: ProviderId, modelId: string) => ModelOption | undefined,
+): Promise<DirectInvokeResult> {
+  const prepared = prepare(deps, input, knownModel);
   try {
     const result = await prepared.adapter.invoke(prepared.request, prepared.key);
     return toResult(prepared.provider, prepared.modelId, textFrom(result.output), result.usage);
@@ -144,8 +214,12 @@ async function invoke(deps: DirectClientDeps, input: DirectInvokeInput): Promise
   }
 }
 
-async function* invokeStream(deps: DirectClientDeps, input: DirectInvokeInput): AsyncGenerator<DirectStreamEvent> {
-  const prepared = prepare(deps, input);
+async function* invokeStream(
+  deps: DirectClientDeps,
+  input: DirectInvokeInput,
+  knownModel: (provider: ProviderId, modelId: string) => ModelOption | undefined,
+): AsyncGenerator<DirectStreamEvent> {
+  const prepared = prepare(deps, input, knownModel);
   const source = prepared.adapter.invokeStream
     ? prepared.adapter.invokeStream(prepared.request, prepared.key)
     : bufferAsStream(prepared.adapter, prepared.request, prepared.key);
@@ -178,7 +252,11 @@ type Prepared = {
   request: ProviderRequest;
 };
 
-function prepare(deps: DirectClientDeps, input: DirectInvokeInput): Prepared {
+function prepare(
+  deps: DirectClientDeps,
+  input: DirectInvokeInput,
+  knownModel: (provider: ProviderId, modelId: string) => ModelOption | undefined,
+): Prepared {
   const key = input.apiKey.trim();
   const provider = detectProvider(key);
   if (!key) throw new AIConnectionsError("INVALID_KEY", LOCAL_MESSAGES.emptyKey);
@@ -187,15 +265,25 @@ function prepare(deps: DirectClientDeps, input: DirectInvokeInput): Prepared {
     throw new AIConnectionsError("INVALID_KEY", UPSTREAM_ERROR_MESSAGES.invalid_key);
   }
   const modelId = input.modelId.trim();
-  if (!modelId || !MODEL_ID.test(modelId) || modelId.includes(key)) {
+  if (!modelId || !isModelId(modelId) || modelId.includes(key)) {
     throw new AIConnectionsError("INVALID_CONFIG", LOCAL_MESSAGES.model);
   }
   if (input.input.length > MAX_DIRECT_MESSAGES) {
     throw new AIConnectionsError("INVALID_CONFIG", LOCAL_MESSAGES.tooManyMessages);
   }
+  if (input.temperature !== undefined && !Number.isFinite(input.temperature)) {
+    throw new AIConnectionsError("INVALID_CONFIG", "Temperature must be a finite number.");
+  }
   const capability = input.capability ?? "chat";
   if (capability !== "chat" && capability !== "vision") {
-    throw new AIConnectionsError("INVALID_CONFIG", "Choose a chat or vision request.");
+    throw new AIConnectionsError("MODEL_INCOMPATIBLE", TASK_UNSUPPORTED_MESSAGE);
+  }
+  const known = knownModel(provider, modelId);
+  const asksForVision = capability === "vision" || input.input.some((message) => message.parts?.some((part) => part.type === "image"));
+  if (known && known.capabilities.length > 0) {
+    if (!known.capabilities.includes(capability) || (asksForVision && !known.capabilities.includes("vision"))) {
+      throw new AIConnectionsError("MODEL_INCOMPATIBLE", TASK_UNSUPPORTED_MESSAGE);
+    }
   }
   for (const message of input.input) {
     const count = message.parts?.length ?? (message.text !== undefined ? 1 : 0);
@@ -227,6 +315,7 @@ function prepare(deps: DirectClientDeps, input: DirectInvokeInput): Prepared {
       input: normalized,
       timeoutMs: input.timeoutMs ?? DEFAULT_INVOKE_TIMEOUT_MS,
       ...(input.maxOutputTokens !== undefined ? { maxOutputTokens: input.maxOutputTokens } : {}),
+      ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
     },
   };
 }

@@ -1,7 +1,9 @@
 import {
   AIConnectionsError,
   MODEL_UNAVAILABLE_MESSAGE,
+  TASK_UNSUPPORTED_MESSAGE,
   UPSTREAM_ERROR_MESSAGES,
+  isTaskMismatchBody,
   type ErrorCode,
   type UpstreamErrorCategory,
 } from "@byoki/core";
@@ -89,6 +91,13 @@ export function classifyUpstream(status: number, body: string): UpstreamFailure 
       message: MODEL_UNAVAILABLE_MESSAGE,
     };
   }
+  if (isTaskMismatchBody(body)) {
+    return {
+      code: "MODEL_INCOMPATIBLE",
+      category: "unknown",
+      message: TASK_UNSUPPORTED_MESSAGE,
+    };
+  }
   return failure("UPSTREAM_UNAVAILABLE", "unknown");
 }
 
@@ -97,10 +106,15 @@ export async function readUpstreamFailure(response: Response): Promise<UpstreamF
   return classifyUpstream(response.status, body);
 }
 
-export async function readError(response: Response): Promise<AIConnectionsError> {
-  const failure = await readUpstreamFailure(response);
-  const requestId = response.headers.get("x-request-id") ?? response.headers.get("request-id") ?? undefined;
+export function errorFromUpstream(status: number, body: string, requestId?: string): AIConnectionsError {
+  const failure = classifyUpstream(status, body);
   return new AIConnectionsError(failure.code, failure.message, requestId, failure.category);
+}
+
+export async function readError(response: Response): Promise<AIConnectionsError> {
+  const body = await response.text();
+  const requestId = response.headers.get("x-request-id") ?? response.headers.get("request-id") ?? undefined;
+  return errorFromUpstream(response.status, body, requestId);
 }
 
 /** Visitor-facing test result. A key test never surfaces model-missing copy or provider text. */
@@ -110,7 +124,7 @@ export async function failedConnectionTest(response: Response): Promise<{
   category: UpstreamErrorCategory;
 }> {
   const failure = await readUpstreamFailure(response);
-  if (failure.code === "MODEL_UNAVAILABLE") {
+  if (failure.code === "MODEL_UNAVAILABLE" || failure.code === "MODEL_INCOMPATIBLE") {
     return { ok: false, reason: UPSTREAM_ERROR_MESSAGES.unknown, category: "unknown" };
   }
   return { ok: false, reason: failure.message, category: failure.category };

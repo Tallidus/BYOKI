@@ -1,6 +1,7 @@
 import {
   AVAILABILITY_CAVEAT,
-  type Capability,
+  categorizeModel,
+  isModelId,
   type ModelOption,
   type ProviderAdapter,
   type ProviderRequest,
@@ -10,6 +11,7 @@ import {
 } from "@byoki/core";
 import { CATALOG_UPDATED_AT } from "./catalog.js";
 import {
+  errorFromUpstream,
   failedConnectionTest,
   providerFetch,
   providerStream,
@@ -19,6 +21,7 @@ import {
   throwProviderEventError,
   type FetchLike,
 } from "./http.js";
+import { initialAttempt, nextAttempt, type ParamAttempt } from "./retry.js";
 
 const BASE = "https://api.openai.com/v1";
 
@@ -50,13 +53,14 @@ async function listModels(fetchImpl: FetchLike, key: string): Promise<ModelOptio
   const response = await providerFetch(fetchImpl, `${BASE}/models`, { method: "GET", headers: auth(key) }, 15_000);
   if (!response.ok) throw await readError(response);
   const body = (await response.json()) as { data?: Array<{ id?: string }> };
-  return (body.data ?? [])
-    .filter((item) => typeof item.id === "string" && /^(gpt-|o[0-9])/.test(item.id))
-    .map((item) => discovered(item.id!, ["chat"]));
+  return (body.data ?? []).flatMap((item) => {
+    if (typeof item.id !== "string" || !isModelId(item.id)) return [];
+    return [discovered(item.id, categorizeModel("openai", item.id))];
+  });
 }
 
-function chatBody(request: ProviderRequest, stream: boolean): string {
-  return JSON.stringify({
+function chatBody(request: ProviderRequest, stream: boolean, attempt: ParamAttempt): string {
+  const payload: Record<string, unknown> = {
     model: request.modelId,
     messages: request.input.map((message) => ({
       role: message.role,
@@ -66,24 +70,54 @@ function chatBody(request: ProviderRequest, stream: boolean): string {
           : { type: "image_url", image_url: { url: `data:${part.mimeType};base64,${part.data}` } },
       ),
     })),
-    ...(request.maxOutputTokens !== undefined ? { max_completion_tokens: request.maxOutputTokens } : {}),
-    ...(stream ? { stream: true, stream_options: { include_usage: true } } : {}),
-  });
+  };
+  if (request.maxOutputTokens !== undefined && !attempt.omit.has(attempt.tokenField)) {
+    payload[attempt.tokenField] = request.maxOutputTokens;
+  }
+  if (request.temperature !== undefined && !attempt.omit.has("temperature")) {
+    payload.temperature = request.temperature;
+  }
+  if (stream) {
+    payload.stream = true;
+    if (!attempt.omit.has("stream_options")) payload.stream_options = { include_usage: true };
+  }
+  return JSON.stringify(payload);
+}
+
+async function postChat(
+  fetchImpl: FetchLike,
+  request: ProviderRequest,
+  key: string,
+  stream: boolean,
+): Promise<Response> {
+  let attempt = initialAttempt();
+  let last: Response | undefined;
+  let lastText = "";
+  for (let tryNumber = 0; tryNumber < 3; tryNumber += 1) {
+    const response = await providerFetch(
+      fetchImpl,
+      `${BASE}/chat/completions`,
+      {
+        method: "POST",
+        headers: { ...auth(key), "content-type": "application/json" },
+        body: chatBody(request, stream, attempt),
+      },
+      request.timeoutMs,
+    );
+    if (response.ok) return response;
+    last = response;
+    lastText = await response.text();
+    const retry = nextAttempt(attempt, lastText);
+    if (!retry) break;
+    attempt = retry;
+  }
+  const requestId = last?.headers.get("x-request-id") ?? last?.headers.get("request-id") ?? undefined;
+  throw errorFromUpstream(last?.status ?? 0, lastText, requestId);
 }
 
 async function invoke(fetchImpl: FetchLike, request: ProviderRequest, key: string): Promise<ProviderResult> {
   const started = Date.now();
-  const response = await providerFetch(
-    fetchImpl,
-    `${BASE}/chat/completions`,
-    {
-      method: "POST",
-      headers: { ...auth(key), "content-type": "application/json" },
-      body: chatBody(request, false),
-    },
-    request.timeoutMs,
-  );
-  if (!response.ok) throw await readError(response);
+  const response = await postChat(fetchImpl, request, key, false);
   const body = (await response.json()) as {
     id?: string;
     choices?: Array<{ message?: { content?: string | null } }>;
@@ -107,16 +141,7 @@ async function* invokeStream(
   key: string,
 ): AsyncGenerator<ProviderStreamEvent> {
   const started = Date.now();
-  const pending = await providerStream(
-    fetchImpl,
-    `${BASE}/chat/completions`,
-    {
-      method: "POST",
-      headers: { ...auth(key), "content-type": "application/json" },
-      body: chatBody(request, true),
-    },
-    request.timeoutMs,
-  );
+  const pending = await openStream(fetchImpl, request, key);
   try {
     if (!pending.response.ok) throw await readError(pending.response);
     let text = "";
@@ -171,11 +196,39 @@ function mapUsage(usage: OpenAIUsage | undefined): { usage?: UsageUnits; gaps: s
   return { usage: mapped, gaps };
 }
 
+async function openStream(fetchImpl: FetchLike, request: ProviderRequest, key: string) {
+  let attempt = initialAttempt();
+  let lastText = "";
+  let lastStatus = 0;
+  let lastId: string | undefined;
+  for (let tryNumber = 0; tryNumber < 3; tryNumber += 1) {
+    const pending = await providerStream(
+      fetchImpl,
+      `${BASE}/chat/completions`,
+      {
+        method: "POST",
+        headers: { ...auth(key), "content-type": "application/json" },
+        body: chatBody(request, true, attempt),
+      },
+      request.timeoutMs,
+    );
+    if (pending.response.ok) return pending;
+    lastStatus = pending.response.status;
+    lastId = pending.response.headers.get("x-request-id") ?? pending.response.headers.get("request-id") ?? undefined;
+    lastText = await pending.response.text();
+    pending.release();
+    const retry = nextAttempt(attempt, lastText);
+    if (!retry) break;
+    attempt = retry;
+  }
+  throw errorFromUpstream(lastStatus, lastText, lastId);
+}
+
 function auth(key: string): Record<string, string> {
   return { authorization: `Bearer ${key}` };
 }
 
-function discovered(id: string, capabilities: Capability[]): ModelOption {
+function discovered(id: string, capabilities: ModelOption["capabilities"]): ModelOption {
   return {
     id,
     provider: "openai",

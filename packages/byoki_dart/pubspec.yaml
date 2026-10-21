@@ -1,6 +1,6 @@
 name: byoki_dart
 description: On-device bring-your-own-key client for OpenAI, Anthropic, and Gemini.
-version: 0.1.0
+version: 0.2.0
 repository: https://github.com/Tallidus/BYOKI/tree/main/packages/byoki_dart
 issue_tracker: https://github.com/Tallidus/BYOKI/issues
 homepage: https://github.com/Tallidus/BYOKI

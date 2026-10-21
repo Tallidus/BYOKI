@@ -1,5 +1,7 @@
 import {
   AVAILABILITY_CAVEAT,
+  categorizeModel,
+  isModelId,
   type ModelOption,
   type ProviderAdapter,
   type ProviderRequest,
@@ -9,15 +11,16 @@ import {
 } from "@byoki/core";
 import { CATALOG_UPDATED_AT } from "./catalog.js";
 import {
+  errorFromUpstream,
   failedConnectionTest,
   providerFetch,
   providerStream,
-  readError,
   readJsonRecord,
   readSse,
   throwProviderEventError,
   type FetchLike,
 } from "./http.js";
+import { initialAttempt, nextAttempt, type ParamAttempt } from "./retry.js";
 
 const BASE = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -44,31 +47,42 @@ async function testKey(fetchImpl: FetchLike, key: string) {
 }
 
 async function listModels(fetchImpl: FetchLike, key: string): Promise<ModelOption[]> {
-  const response = await providerFetch(fetchImpl, `${BASE}/models`, { method: "GET", headers: headers(key) }, 15_000);
-  if (!response.ok) throw await readError(response);
-  const body = (await response.json()) as {
-    models?: Array<{ name?: string; displayName?: string; supportedGenerationMethods?: string[] }>;
-  };
-  return (body.models ?? [])
-    .filter((item) => item.supportedGenerationMethods?.includes("generateContent") && item.name)
-    .map((item) => {
-      const id = item.name!.replace(/^models\//, "");
-      const specialized = /image|tts|live|transcribe|embed/i.test(id);
-      const capabilities: Array<"chat" | "vision"> = specialized ? [] : ["chat", "vision"];
-      return {
+  const models: ModelOption[] = [];
+  let pageToken: string | undefined;
+  for (let page = 0; page < 10; page += 1) {
+    const url = new URL(`${BASE}/models`);
+    url.searchParams.set("pageSize", "100");
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+    const response = await providerFetch(fetchImpl, url.toString(), { method: "GET", headers: headers(key) }, 15_000);
+    if (!response.ok) throw errorFromUpstream(response.status, await response.text());
+    const body = (await response.json()) as {
+      nextPageToken?: string;
+      models?: Array<{ name?: string; displayName?: string; supportedGenerationMethods?: string[] }>;
+    };
+    for (const item of body.models ?? []) {
+      if (!item.name) continue;
+      const id = item.name.replace(/^models\//, "");
+      if (!isModelId(id)) continue;
+      models.push({
         id,
-        provider: "gemini" as const,
-        capabilities,
+        provider: "gemini",
+        capabilities: categorizeModel("gemini", id, {
+          displayName: item.displayName,
+          methods: item.supportedGenerationMethods,
+        }),
         displayName: item.displayName || id,
         catalogUpdatedAt: CATALOG_UPDATED_AT,
-        source: "discovered" as const,
+        source: "discovered",
         availabilityCaveat: AVAILABILITY_CAVEAT,
-      };
-    })
-    .filter((item) => item.capabilities.length > 0);
+      });
+    }
+    if (!body.nextPageToken || body.nextPageToken === pageToken) break;
+    pageToken = body.nextPageToken;
+  }
+  return models;
 }
 
-function generateBody(request: ProviderRequest): string {
+function generateBody(request: ProviderRequest, attempt: ParamAttempt): string {
   const system = request.input
     .filter((message) => message.role === "system")
     .flatMap((message) => message.parts.filter((part) => part.type === "text").map((part) => part.text))
@@ -83,28 +97,54 @@ function generateBody(request: ProviderRequest): string {
           : { inline_data: { mime_type: part.mimeType, data: part.data } },
       ),
     }));
+  const generationConfig: Record<string, number> = {};
+  if (
+    request.maxOutputTokens !== undefined &&
+    !attempt.omit.has("maxOutputTokens") &&
+    !attempt.omit.has("generationConfig")
+  ) {
+    generationConfig.maxOutputTokens = request.maxOutputTokens;
+  }
+  if (request.temperature !== undefined && !attempt.omit.has("temperature") && !attempt.omit.has("generationConfig")) {
+    generationConfig.temperature = request.temperature;
+  }
   return JSON.stringify({
     ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
     contents,
-    ...(request.maxOutputTokens !== undefined
-      ? { generationConfig: { maxOutputTokens: request.maxOutputTokens } }
-      : {}),
+    ...(Object.keys(generationConfig).length > 0 ? { generationConfig } : {}),
   });
+}
+
+async function postGenerate(fetchImpl: FetchLike, request: ProviderRequest, key: string, stream: boolean): Promise<Response> {
+  let attempt = initialAttempt();
+  let lastText = "";
+  let last: Response | undefined;
+  const method = stream ? "streamGenerateContent?alt=sse" : "generateContent";
+  for (let tryNumber = 0; tryNumber < 3; tryNumber += 1) {
+    const response = await providerFetch(
+      fetchImpl,
+      `${BASE}/models/${encodeURIComponent(request.modelId)}:${method}`,
+      {
+        method: "POST",
+        headers: { ...headers(key), "content-type": "application/json" },
+        body: generateBody(request, attempt),
+      },
+      request.timeoutMs,
+    );
+    if (response.ok) return response;
+    last = response;
+    lastText = await response.text();
+    const retry = nextAttempt(attempt, lastText);
+    if (!retry) break;
+    attempt = retry;
+  }
+  const requestId = last?.headers.get("x-request-id") ?? last?.headers.get("request-id") ?? undefined;
+  throw errorFromUpstream(last?.status ?? 0, lastText, requestId);
 }
 
 async function invoke(fetchImpl: FetchLike, request: ProviderRequest, key: string): Promise<ProviderResult> {
   const started = Date.now();
-  const response = await providerFetch(
-    fetchImpl,
-    `${BASE}/models/${encodeURIComponent(request.modelId)}:generateContent`,
-    {
-      method: "POST",
-      headers: { ...headers(key), "content-type": "application/json" },
-      body: generateBody(request),
-    },
-    request.timeoutMs,
-  );
-  if (!response.ok) throw await readError(response);
+  const response = await postGenerate(fetchImpl, request, key, false);
   const body = (await response.json()) as {
     responseId?: string;
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
@@ -137,24 +177,42 @@ async function invoke(fetchImpl: FetchLike, request: ProviderRequest, key: strin
   };
 }
 
+async function openStream(fetchImpl: FetchLike, request: ProviderRequest, key: string) {
+  let attempt = initialAttempt();
+  let lastText = "";
+  let lastStatus = 0;
+  let lastId: string | undefined;
+  for (let tryNumber = 0; tryNumber < 3; tryNumber += 1) {
+    const pending = await providerStream(
+      fetchImpl,
+      `${BASE}/models/${encodeURIComponent(request.modelId)}:streamGenerateContent?alt=sse`,
+      {
+        method: "POST",
+        headers: { ...headers(key), "content-type": "application/json" },
+        body: generateBody(request, attempt),
+      },
+      request.timeoutMs,
+    );
+    if (pending.response.ok) return pending;
+    lastStatus = pending.response.status;
+    lastId = pending.response.headers.get("x-request-id") ?? pending.response.headers.get("request-id") ?? undefined;
+    lastText = await pending.response.text();
+    pending.release();
+    const retry = nextAttempt(attempt, lastText);
+    if (!retry) break;
+    attempt = retry;
+  }
+  throw errorFromUpstream(lastStatus, lastText, lastId);
+}
+
 async function* invokeStream(
   fetchImpl: FetchLike,
   request: ProviderRequest,
   key: string,
 ): AsyncGenerator<ProviderStreamEvent> {
   const started = Date.now();
-  const pending = await providerStream(
-    fetchImpl,
-    `${BASE}/models/${encodeURIComponent(request.modelId)}:streamGenerateContent?alt=sse`,
-    {
-      method: "POST",
-      headers: { ...headers(key), "content-type": "application/json" },
-      body: generateBody(request),
-    },
-    request.timeoutMs,
-  );
+  const pending = await openStream(fetchImpl, request, key);
   try {
-    if (!pending.response.ok) throw await readError(pending.response);
     let text = "";
     let id: string | undefined;
     let promptTokens: number | undefined;

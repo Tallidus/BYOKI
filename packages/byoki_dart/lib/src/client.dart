@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import 'catalog.dart';
 import 'detect.dart';
+import 'discover.dart';
 import 'errors.dart';
 import 'sse.dart';
 
@@ -70,6 +71,14 @@ class ByokiDone extends ByokiEvent {
 }
 
 /// Calls OpenAI, Anthropic, or Gemini directly. The key is not stored here.
+class _CachedModels {
+  _CachedModels(this.fingerprint, this.models, this.fallback);
+
+  final String fingerprint;
+  final List<ByokiModel> models;
+  final bool fallback;
+}
+
 class ByokiClient {
   ByokiClient({http.Client? httpClient})
     : _http = httpClient ?? http.Client(),
@@ -77,6 +86,7 @@ class ByokiClient {
 
   final http.Client _http;
   final bool _ownsHttp;
+  final _cache = <String, _CachedModels>{};
 
   static const testTimeout = Duration(seconds: 15);
   static const invokeTimeout = Duration(seconds: 60);
@@ -84,11 +94,80 @@ class ByokiClient {
   String? detect(String apiKey) => detectProvider(apiKey);
 
   List<ByokiModel> models({String? provider, String? capability}) {
-    return byokiCatalog.where((model) {
+    return _filter(byokiCatalog, provider: provider, capability: capability);
+  }
+
+  /// Lists models with the user's key. A successful list is cached on this client.
+  /// Network, CORS, and permission failures return the developer catalog.
+  Future<ByokiDiscovery> discoverModels(String apiKey, {String? capability, bool refresh = false}) async {
+    final key = apiKey.trim();
+    final provider = detectProvider(key);
+    if (key.isEmpty || provider == null) {
+      return const ByokiDiscovery(models: [], source: 'catalog', fallback: true);
+    }
+    final fingerprint = byokiKeyFingerprint(key);
+    final cached = _cache[provider];
+    if (!refresh && cached != null && cached.fingerprint == fingerprint) {
+      return ByokiDiscovery(
+        models: _filter(cached.models, provider: provider, capability: capability),
+        source: cached.fallback ? 'catalog' : 'discovered',
+        fallback: cached.fallback,
+      );
+    }
+    final catalog = models(provider: provider);
+    try {
+      final listed = mergeDiscoveredModels(await _listAll(provider, key), catalog);
+      _cache[provider] = _CachedModels(fingerprint, listed, false);
+      return ByokiDiscovery(
+        models: _filter(listed, capability: capability),
+        source: 'discovered',
+        fallback: false,
+      );
+    } catch (_) {
+      _cache[provider] = _CachedModels(fingerprint, catalog, true);
+      return ByokiDiscovery(
+        models: _filter(catalog, capability: capability),
+        source: 'catalog',
+        fallback: true,
+      );
+    }
+  }
+
+  List<ByokiModel> _filter(List<ByokiModel> source, {String? provider, String? capability}) {
+    return source.where((model) {
       if (provider != null && model.provider != provider) return false;
       if (capability != null && !model.capabilities.contains(capability)) return false;
       return true;
     }).toList();
+  }
+
+  ByokiModel? _known(String provider, String modelId) {
+    final cached = _cache[provider];
+    if (cached != null) {
+      for (final model in cached.models) {
+        if (model.id == modelId) return model;
+      }
+    }
+    for (final model in byokiCatalog) {
+      if (model.provider == provider && model.id == modelId) return model;
+    }
+    return null;
+  }
+
+  Future<List<ByokiModel>> _listAll(String provider, String key) async {
+    final found = <ByokiModel>[];
+    String? cursor;
+    for (var page = 0; page < 10; page++) {
+      final request = http.Request('GET', _listUri(provider, cursor));
+      request.headers.addAll(_auth(provider, key));
+      final response = await _send(request, testTimeout);
+      final raw = await response.stream.bytesToString();
+      found.addAll(modelsFromProviderBody(provider, raw));
+      final next = providerPageCursor(provider, raw);
+      if (next == null || next == cursor) break;
+      cursor = next;
+    }
+    return found;
   }
 
   Future<ByokiKeyTest> testKey(String apiKey) async {
@@ -118,6 +197,7 @@ class ByokiClient {
     String? provider,
     String capability = 'chat',
     int? maxOutputTokens,
+    double? temperature,
     Duration? timeout,
   }) async {
     final prepared = _prepare(
@@ -127,10 +207,11 @@ class ByokiClient {
       provider: provider,
       capability: capability,
       maxOutputTokens: maxOutputTokens,
+      temperature: temperature,
       timeout: timeout,
     );
-    final request = _jsonRequest(prepared, stream: false);
-    final response = await _send(request, prepared.timeout);
+    _guardTask(prepared, capability, input);
+    final response = await _postWithRetry(prepared, stream: false);
     final record = _object(await response.stream.bytesToString());
     _throwIfError(record);
     return ByokiResult(
@@ -148,6 +229,7 @@ class ByokiClient {
     String? provider,
     String capability = 'chat',
     int? maxOutputTokens,
+    double? temperature,
     Duration? timeout,
   }) async* {
     final prepared = _prepare(
@@ -157,10 +239,11 @@ class ByokiClient {
       provider: provider,
       capability: capability,
       maxOutputTokens: maxOutputTokens,
+      temperature: temperature,
       timeout: timeout,
     );
-    final request = _jsonRequest(prepared, stream: true);
-    final response = await _send(request, prepared.timeout);
+    _guardTask(prepared, capability, input);
+    final response = await _postWithRetry(prepared, stream: true);
     final accum = _Accum();
     try {
       await for (final event in parseSse(response.stream.timeout(prepared.timeout))) {
@@ -190,11 +273,50 @@ class ByokiClient {
     if (_ownsHttp) _http.close();
   }
 
-  http.Request _jsonRequest(_Prepared prepared, {required bool stream}) {
+  void _guardTask(_Prepared prepared, String capability, List<ByokiMessage> input) {
+    final known = _known(prepared.provider, prepared.modelId);
+    if (known == null || known.capabilities.isEmpty) return;
+    final asksForVision = capability == 'vision' ||
+        input.any((message) => message.parts?.any((part) => part.type == 'image') ?? false);
+    if (!known.capabilities.contains(capability) || (asksForVision && !known.capabilities.contains('vision'))) {
+      throw ByokiException(category: 'unknown', message: ByokiMessages.taskUnsupported, code: 'MODEL_INCOMPATIBLE');
+    }
+  }
+
+  Future<http.StreamedResponse> _postWithRetry(_Prepared prepared, {required bool stream}) async {
+    var attempt = ByokiParamAttempt(<String>{}, 'max_completion_tokens');
+    for (var tryNumber = 0; tryNumber < 3; tryNumber++) {
+      final request = _jsonRequest(prepared, stream: stream, attempt: attempt);
+      final response = await _sendRaw(request, prepared.timeout);
+      if (response.statusCode >= 200 && response.statusCode < 300) return response;
+      final raw = await response.stream.bytesToString().timeout(prepared.timeout);
+      if (isTaskMismatchBody(raw)) {
+        throw ByokiException(category: 'unknown', message: ByokiMessages.taskUnsupported, code: 'MODEL_INCOMPATIBLE');
+      }
+      final next = nextByokiAttempt(attempt, raw);
+      if (next == null) throw classifyProviderFailure(response.statusCode, raw);
+      attempt = next;
+    }
+    throw ByokiException(category: 'unknown', message: ByokiMessages.unknown, code: 'UPSTREAM_UNAVAILABLE');
+  }
+
+  http.Request _jsonRequest(_Prepared prepared, {required bool stream, required ByokiParamAttempt attempt}) {
     final request = http.Request('POST', _invokeUri(prepared.provider, prepared.modelId, stream: stream));
     request.headers.addAll({..._auth(prepared.provider, prepared.key), 'content-type': 'application/json'});
-    request.body = jsonEncode(_body(prepared, stream: stream));
+    request.body = jsonEncode(_body(prepared, stream: stream, attempt: attempt));
     return request;
+  }
+
+  Future<http.StreamedResponse> _sendRaw(http.Request request, Duration timeout) async {
+    try {
+      return await _http.send(request).timeout(timeout);
+    } on ByokiException {
+      rethrow;
+    } on TimeoutException {
+      throw networkFailure();
+    } catch (_) {
+      throw networkFailure();
+    }
   }
 
   Future<http.StreamedResponse> _send(http.Request request, Duration timeout) async {
@@ -223,6 +345,7 @@ class _Prepared {
     required this.messages,
     required this.timeout,
     this.maxOutputTokens,
+    this.temperature,
   });
 
   final String key;
@@ -231,6 +354,7 @@ class _Prepared {
   final List<_WireMessage> messages;
   final Duration timeout;
   final int? maxOutputTokens;
+  final double? temperature;
 }
 
 class _WireMessage {
@@ -264,6 +388,7 @@ _Prepared _prepare({
   String? provider,
   String capability = 'chat',
   int? maxOutputTokens,
+  double? temperature,
   Duration? timeout,
 }) {
   final key = apiKey.trim();
@@ -278,8 +403,11 @@ _Prepared _prepare({
   if (model.isEmpty || !_modelId.hasMatch(model) || model.contains(key)) {
     throw ByokiException(category: 'unknown', message: ByokiMessages.chooseModel);
   }
-  if (capability != 'chat' && capability != 'vision') {
+  if (temperature != null && !temperature.isFinite) {
     throw ByokiException(category: 'unknown', message: ByokiMessages.unknown);
+  }
+  if (capability != 'chat' && capability != 'vision') {
+    throw ByokiException(category: 'unknown', message: ByokiMessages.taskUnsupported, code: 'MODEL_INCOMPATIBLE');
   }
   if (input.length > 32) {
     throw ByokiException(category: 'unknown', message: ByokiMessages.tooManyMessages);
@@ -313,6 +441,7 @@ _Prepared _prepare({
     messages: messages,
     timeout: timeout ?? ByokiClient.invokeTimeout,
     maxOutputTokens: maxOutputTokens,
+    temperature: temperature,
   );
 }
 
@@ -328,6 +457,25 @@ Map<String, String> _auth(String provider, String key) {
       };
     case 'gemini':
       return {'x-goog-api-key': key};
+    default:
+      throw ByokiException(category: 'invalid_key', message: ByokiMessages.invalidKey, code: 'INVALID_KEY');
+  }
+}
+
+Uri _listUri(String provider, String? cursor) {
+  switch (provider) {
+    case 'openai':
+      return Uri.parse('https://api.openai.com/v1/models');
+    case 'anthropic':
+      return Uri.https('api.anthropic.com', '/v1/models', {
+        'limit': '100',
+        if (cursor != null) 'after_id': cursor,
+      });
+    case 'gemini':
+      return Uri.https('generativelanguage.googleapis.com', '/v1beta/models', {
+        'pageSize': '100',
+        if (cursor != null) 'pageToken': cursor,
+      });
     default:
       throw ByokiException(category: 'invalid_key', message: ByokiMessages.invalidKey, code: 'INVALID_KEY');
   }
@@ -360,7 +508,7 @@ Uri _invokeUri(String provider, String modelId, {required bool stream}) {
   }
 }
 
-Map<String, Object?> _body(_Prepared prepared, {required bool stream}) {
+Map<String, Object?> _body(_Prepared prepared, {required bool stream, required ByokiParamAttempt attempt}) {
   switch (prepared.provider) {
     case 'openai':
       return {
@@ -373,9 +521,11 @@ Map<String, Object?> _body(_Prepared prepared, {required bool stream}) {
               },
             )
             .toList(),
-        if (prepared.maxOutputTokens != null) 'max_completion_tokens': prepared.maxOutputTokens,
+        if (prepared.maxOutputTokens != null && !attempt.omit.contains(attempt.tokenField))
+          attempt.tokenField: prepared.maxOutputTokens,
+        if (prepared.temperature != null && !attempt.omit.contains('temperature')) 'temperature': prepared.temperature,
         if (stream) 'stream': true,
-        if (stream) 'stream_options': {'include_usage': true},
+        if (stream && !attempt.omit.contains('stream_options')) 'stream_options': {'include_usage': true},
       };
     case 'anthropic':
       final system = prepared.messages
@@ -385,7 +535,8 @@ Map<String, Object?> _body(_Prepared prepared, {required bool stream}) {
           .join('\n');
       return {
         'model': prepared.modelId,
-        'max_tokens': prepared.maxOutputTokens ?? 1024,
+        if (!attempt.omit.contains('max_tokens')) 'max_tokens': prepared.maxOutputTokens ?? 1024,
+        if (prepared.temperature != null && !attempt.omit.contains('temperature')) 'temperature': prepared.temperature,
         if (system.isNotEmpty) 'system': system,
         'messages': prepared.messages
             .where((message) => message.role != 'system')
@@ -404,6 +555,7 @@ Map<String, Object?> _body(_Prepared prepared, {required bool stream}) {
           .expand((message) => message.parts.where((part) => part.type == 'text').map((part) => part.text ?? ''))
           .where((text) => text.isNotEmpty)
           .join('\n');
+      final generationConfig = _geminiConfig(prepared, attempt);
       return {
         if (system.isNotEmpty) 'systemInstruction': {'parts': [{'text': system}]},
         'contents': prepared.messages
@@ -415,11 +567,24 @@ Map<String, Object?> _body(_Prepared prepared, {required bool stream}) {
               },
             )
             .toList(),
-        if (prepared.maxOutputTokens != null) 'generationConfig': {'maxOutputTokens': prepared.maxOutputTokens},
+        if (generationConfig != null) 'generationConfig': generationConfig,
       };
     default:
       throw ByokiException(category: 'unknown', message: ByokiMessages.unknown);
   }
+}
+
+Map<String, Object>? _geminiConfig(_Prepared prepared, ByokiParamAttempt attempt) {
+  if (attempt.omit.contains('generationConfig')) return null;
+  final config = <String, Object>{};
+  if (prepared.maxOutputTokens != null && !attempt.omit.contains('maxOutputTokens')) {
+    config['maxOutputTokens'] = prepared.maxOutputTokens!;
+  }
+  if (prepared.temperature != null && !attempt.omit.contains('temperature')) {
+    config['temperature'] = prepared.temperature!;
+  }
+  if (config.isEmpty) return null;
+  return config;
 }
 
 Map<String, Object?> _openAiPart(ByokiPart part) {
