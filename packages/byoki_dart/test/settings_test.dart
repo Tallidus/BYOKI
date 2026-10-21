@@ -12,7 +12,10 @@ void main() {
   testWidgets('tests, saves, picks a model, and removes the key without showing it again', (tester) async {
     final store = MemoryByokiKeyStore();
     final httpClient = ScriptedClient((request) async {
-      return http.StreamedResponse(Stream.value(utf8.encode('{"data":[]}')), 200);
+      return http.StreamedResponse(
+        Stream.value(utf8.encode('{"data":[{"id":"gpt-5.6-terra"},{"id":"gpt-5.6-luna"}]}')),
+        200,
+      );
     });
     final client = ByokiClient(httpClient: httpClient);
     await tester.pumpWidget(_app(ByokiSettings(client: client, store: store)));
@@ -36,9 +39,10 @@ void main() {
     expect(await store.readKey('openai'), key);
     expect(store.names, isNot(contains(key)));
     expect(store.names, contains('byoki.v1.key.openai'));
-    expect(httpClient.requests.single.url.toString(), 'https://api.openai.com/v1/models');
-    expect(httpClient.requests.single.url.toString(), isNot(contains(key)));
-    expect(httpClient.requests.single.headers['authorization'], 'Bearer $key');
+    expect(httpClient.requests, hasLength(2));
+    expect(httpClient.requests.map((request) => request.url.toString()), everyElement('https://api.openai.com/v1/models'));
+    expect(httpClient.requests.map((request) => request.url.toString()).join(' '), isNot(contains(key)));
+    expect(httpClient.requests.first.headers['authorization'], 'Bearer $key');
     expect(find.text('GPT-5.6 Terra'), findsOneWidget);
 
     await tester.tap(find.byType(DropdownButton<String>));
@@ -55,6 +59,59 @@ void main() {
     client.close();
   });
 
+  testWidgets('asks before a non-recommended model is saved and remembers the answer', (tester) async {
+    final store = MemoryByokiKeyStore();
+    final httpClient = ScriptedClient((request) async {
+      return http.StreamedResponse(
+        Stream.value(utf8.encode('{"data":[{"id":"gpt-5.6-terra"},{"id":"gpt-4o-mini"}]}')),
+        200,
+      );
+    });
+    final client = ByokiClient(httpClient: httpClient);
+    await tester.pumpWidget(
+      _app(
+        ByokiSettings(
+          client: client,
+          store: store,
+          recommended: const {
+            'chat': [ByokiRecommendation(provider: 'openai', modelId: 'gpt-5.6-terra', displayName: 'GPT-5.6 Terra')],
+          },
+          defaultModels: const {'chat': 'gpt-5.6-terra'},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.bySemanticsLabel('Provider API key'), key);
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Test and save'));
+    await tester.pumpAndSettle();
+    expect(find.text('GPT-5.6 Terra'), findsOneWidget);
+
+    await tester.tap(find.byType(DropdownButton<String>));
+    await tester.pumpAndSettle();
+    expect(find.text('Recommended'), findsOneWidget);
+    expect(find.text('All available models'), findsOneWidget);
+    await tester.tap(find.text('gpt-4o-mini').last);
+    await tester.pumpAndSettle();
+    expect(find.text(byokiNotRecommended), findsOneWidget);
+    expect(await store.readModel('openai', 'chat'), 'gpt-5.6-terra');
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(await store.hasAck('openai', 'gpt-4o-mini'), isFalse);
+
+    await tester.tap(find.byType(DropdownButton<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('gpt-4o-mini').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Use this model'));
+    await tester.pumpAndSettle();
+    expect(await store.readModel('openai', 'chat'), 'gpt-4o-mini');
+    expect(await store.hasAck('openai', 'gpt-4o-mini'), isTrue);
+    expect(store.names, contains('byoki.v1.ack.openai.gpt-4o-mini'));
+    client.close();
+  });
+
   testWidgets('a stored key is not copied back into the field', (tester) async {
     const secret = 'AIzaSyStoredKey99';
     final store = MemoryByokiKeyStore();
@@ -65,7 +122,8 @@ void main() {
     expect(find.text('Gemini key saved'), findsOneWidget);
     expect(find.text('Gemini 3.1 Flash-Lite'), findsOneWidget);
     expect(find.text(secret), findsNothing);
-    expect(find.byType(TextField), findsNothing);
+    expect(find.bySemanticsLabel('Provider API key'), findsNothing);
+    expect(tester.widget<TextField>(find.byKey(const Key('custom-chat'))).controller?.text, isEmpty);
   });
 
   test('secure storage names are the spec names, not the key', () async {

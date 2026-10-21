@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { connectionTestMessage, scrubVisitorText, type ProviderId } from "@byoki/core/browser";
+import {
+  NON_RECOMMENDED_MODEL_WARNING,
+  connectionTestMessage,
+  isModelId,
+  modelAckName,
+  scrubVisitorText,
+  type ProviderId,
+} from "@byoki/core/browser";
 import type { ConnectionsClient, ConnectionsView, ModelView, UsageView } from "./client.js";
 
 const NAMES: Record<ProviderId, string> = {
@@ -241,6 +248,22 @@ function ModelSection({
   );
 }
 
+function acknowledged(provider: string, modelId: string): boolean {
+  try {
+    return window.localStorage.getItem(modelAckName(provider as ProviderId, modelId)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function rememberAck(provider: string, modelId: string): void {
+  try {
+    window.localStorage.setItem(modelAckName(provider as ProviderId, modelId), "1");
+  } catch {
+    // The selection can still be saved. The warning is shown again next time.
+  }
+}
+
 function ModelPicker({
   capability,
   client,
@@ -250,50 +273,175 @@ function ModelPicker({
   client: ConnectionsClient;
   onChange: () => Promise<void>;
 }) {
+  const recommended = capability.recommendedModels ?? [];
   const [models, setModels] = useState<ModelView[]>([]);
-  const [choice, setChoice] = useState(
-    capability.selection ? `${capability.selection.provider}:${capability.selection.modelId}` : "",
-  );
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [choice, setChoice] = useState(() => {
+    if (capability.selection) return `${capability.selection.provider}:${capability.selection.modelId}`;
+    if (capability.defaultModel) return `${capability.defaultModel.provider}:${capability.defaultModel.modelId}`;
+    return "";
+  });
+  const [customId, setCustomId] = useState("");
+  const [customProvider, setCustomProvider] = useState<ProviderId>(capability.providers[0] ?? "openai");
+  const [ack, setAck] = useState(false);
   const [message, setMessage] = useState<string | null>(capability.selectionIssue?.message ?? null);
   const selectId = useId();
+  const customInputId = useId();
+  const ackId = useId();
 
   useEffect(() => {
-    void client.getModels(capability.id).then((result) => setModels(result.models)).catch((caught: unknown) => {
-      setMessage(caught instanceof Error ? caught.message : "Models could not be loaded.");
-    });
+    void client
+      .getModels(capability.id, true)
+      .then((result) => {
+        setModels(result.models);
+        setWarnings(result.warnings);
+      })
+      .catch((caught: unknown) => {
+        setMessage(caught instanceof Error ? caught.message : "Models could not be loaded.");
+      });
   }, [capability.id, client]);
 
   if (!capability.userCanChooseModel) {
     return <p>{capability.id} uses a model chosen by the app.</p>;
   }
 
+  const recommendedKeys = new Set(recommended.map((model) => `${model.provider}:${model.modelId}`));
+  const recommendedOptions = recommended.map((model) => {
+    const found = models.find((item) => item.provider === model.provider && item.id === model.modelId);
+    return (
+      found ?? {
+        id: model.modelId,
+        provider: model.provider,
+        displayName: model.displayName ?? model.modelId,
+        capabilities: [capability.id],
+        catalogUpdatedAt: "",
+        source: "catalog" as const,
+        availabilityCaveat: "",
+      }
+    );
+  });
+  const availableOptions = models.filter((model) => !recommendedKeys.has(`${model.provider}:${model.id}`));
+  const custom = customId.trim();
+  const usingCustom = custom.length > 0;
+  const separator = choice.indexOf(":");
+  const selectedProvider = usingCustom ? customProvider : separator === -1 ? "" : choice.slice(0, separator);
+  const selectedModel = usingCustom ? custom : separator === -1 ? "" : choice.slice(separator + 1);
+  const recommendedChoice =
+    !usingCustom && !!selectedProvider && !!selectedModel && recommendedKeys.has(`${selectedProvider}:${selectedModel}`);
+  const needsAck =
+    !!selectedProvider &&
+    !!selectedModel &&
+    (usingCustom || (recommended.length > 0 && !recommendedChoice));
+  const alreadyAcked = needsAck && selectedProvider && selectedModel ? acknowledged(selectedProvider, selectedModel) : false;
+  const showWarning = needsAck && !alreadyAcked;
+
   return (
     <form
       className="byoki-card"
       onSubmit={(event) => {
         event.preventDefault();
-        const [provider, modelId] = choice.split(":");
-        if (!provider || !modelId) return;
+        if (!selectedProvider || !selectedModel || !isModelId(selectedModel)) {
+          setMessage("Choose a model.");
+          return;
+        }
+        if (showWarning && !ack) {
+          setMessage(NON_RECOMMENDED_MODEL_WARNING);
+          return;
+        }
+        if (needsAck) rememberAck(selectedProvider, selectedModel);
         void client
-          .putSelection(capability.id, provider as ProviderId, modelId)
-          .then(() => onChange())
+          .putSelection(capability.id, selectedProvider as ProviderId, selectedModel)
+          .then(() => {
+            setCustomId("");
+            setAck(false);
+            setMessage(null);
+            return onChange();
+          })
           .catch((caught: unknown) => setMessage(caught instanceof Error ? caught.message : "The selection was rejected."));
       }}
     >
       <label htmlFor={selectId}>Model for {capability.id}</label>
-      <select id={selectId} value={choice} onChange={(event) => setChoice(event.target.value)}>
+      <select
+        id={selectId}
+        value={usingCustom ? "" : choice}
+        onChange={(event) => {
+          setChoice(event.target.value);
+          setCustomId("");
+          setAck(false);
+          setMessage(null);
+        }}
+      >
         <option value="">Choose a connected model</option>
-        {models.map((model) => (
-          <option key={`${model.provider}:${model.id}`} value={`${model.provider}:${model.id}`}>
-            {NAMES[model.provider]} · {model.displayName}
-          </option>
-        ))}
+        {recommendedOptions.length > 0 ? (
+          <optgroup label="Recommended">
+            {recommendedOptions.map((model) => (
+              <option key={`rec-${model.provider}:${model.id}`} value={`${model.provider}:${model.id}`}>
+                {NAMES[model.provider]} · {model.displayName}
+              </option>
+            ))}
+          </optgroup>
+        ) : null}
+        {availableOptions.length > 0 ? (
+          <optgroup label="All available models">
+            {availableOptions.map((model) => (
+              <option key={`all-${model.provider}:${model.id}`} value={`${model.provider}:${model.id}`}>
+                {NAMES[model.provider]} · {model.displayName}
+              </option>
+            ))}
+          </optgroup>
+        ) : null}
       </select>
+      <label htmlFor={customInputId}>Custom model ID</label>
+      <input
+        id={customInputId}
+        value={customId}
+        autoComplete="off"
+        spellCheck={false}
+        onChange={(event) => {
+          setCustomId(event.target.value);
+          setAck(false);
+          setMessage(null);
+        }}
+      />
+      {capability.providers.length > 1 ? (
+        <label>
+          Provider for custom model
+          <select
+            aria-label="Provider for custom model"
+            value={customProvider}
+            onChange={(event) => setCustomProvider(event.target.value as ProviderId)}
+          >
+            {capability.providers.map((provider) => (
+              <option key={provider} value={provider}>
+                {NAMES[provider]}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <p className="byoki-note">
-        Catalog checked {models[0]?.catalogUpdatedAt ?? "when this list was published"}. A listed model may be disabled on your account.
+        {warnings.length > 0
+          ? "The provider model list could not be loaded. Showing the app's model list."
+          : "Models come from the provider when the key can list them. A listed model may still be disabled on the account."}
       </p>
+      {showWarning ? (
+        <div className="byoki-warning">
+          <p>{NON_RECOMMENDED_MODEL_WARNING}</p>
+          <label htmlFor={ackId}>
+            <input
+              id={ackId}
+              type="checkbox"
+              checked={ack}
+              onChange={(event) => setAck(event.target.checked)}
+            />{" "}
+            I understand and I'm responsible for this model's output.
+          </label>
+        </div>
+      ) : null}
       {message ? <p className="byoki-error">{message}</p> : null}
-      <button type="submit">Save model</button>
+      <button type="submit" disabled={showWarning && !ack}>
+        Save model
+      </button>
     </form>
   );
 }
@@ -393,6 +541,8 @@ const STYLES = `
 .byoki-status { font-weight: 700; }
 .byoki-note { color: #5c5348; font-size: 0.9rem; }
 .byoki-error { color: #8d1d1d; }
+.byoki-warning { background: #fff4e5; border: 1px solid #e4d7c8; border-radius: 8px; padding: 0.75rem; margin-top: 0.75rem; }
+.byoki-warning label { font-weight: 600; }
 .byoki table { width: 100%; border-collapse: collapse; }
 .byoki th, .byoki td { text-align: left; border-bottom: 1px solid #e4d7c8; padding: 0.35rem; font-size: 0.9rem; }
 @media (max-width: 640px) {

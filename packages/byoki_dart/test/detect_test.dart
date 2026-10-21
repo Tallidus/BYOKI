@@ -33,5 +33,8 @@ void main() {
     }
     final errors = jsonDecode(File('../../spec/errors.json').readAsStringSync()) as Map<String, Object?>;
     expect(errors['messages'], ByokiMessages.byCategory);
+    final choice = errors['modelChoice'] as Map<String, Object?>;
+    expect(choice['notRecommended'], byokiNotRecommended);
+    expect(choice['taskUnsupported'], ByokiMessages.taskUnsupported);
   });
 }

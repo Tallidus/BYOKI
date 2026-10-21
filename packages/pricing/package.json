@@ -1,6 +1,6 @@
 {
   "name": "@byoki/pricing",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Versioned price catalog and cost estimates for BYOKI.",
   "license": "MIT",
   "repository": {

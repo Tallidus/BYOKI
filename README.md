@@ -16,7 +16,19 @@ The live demo, docs, and downloads are at [https://byoki.eastonnielson.dev](http
 - [Deployment](docs/deployment.md)
 - [Threat model](docs/threat-model.md)
 
-The packages are ESM-only and require Node 20 or newer. `@byoki/react` requires React 19.
+The packages are ESM-only and require Node 20 or newer. `@byoki/react` requires React 19. Packages are versioned together at `0.2.0`.
+
+## Choosing a model
+
+End users can pick any model their key can access. `discoverModels` calls the provider's model list from the device (OpenAI `GET /v1/models`, Anthropic `GET /v1/models`, Gemini `models.list`), caches the result for the session, and falls back to the developer catalog if listing fails. Models are tagged `chat`, `vision`, `image`, `embedding`, or `audio`, so an app can filter to the capabilities it uses.
+
+Declare `recommendedModels` and a `defaultModel` per capability. Settings show those first under **Recommended**, then **All available models**, plus a custom model id. Choosing a model outside the recommended list requires this acknowledgment, stored on the device per model:
+
+> This model isn't recommended for this app. It may produce unexpected results, and you're responsible for its output.
+
+Calls use the selected model. If a model rejects `temperature` or wants `max_tokens` instead of `max_completion_tokens`, the client retries without the unsupported parameter. If the model cannot do the task, the user sees: "This model can't do that task. Choose a model that supports it."
+
+See [spec/SPEC.md](spec/SPEC.md) and the migration notes in the pull request for Dungeon Assistant, My Garage, and Cadence.
 
 ```bash
 corepack pnpm install --frozen-lockfile

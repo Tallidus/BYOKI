@@ -1,4 +1,4 @@
-export const CAPABILITIES = ["chat", "vision"] as const;
+export const CAPABILITIES = ["chat", "vision", "image", "embedding", "audio"] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
 export const PROVIDER_IDS = ["openai", "anthropic", "gemini"] as const;
@@ -71,6 +71,8 @@ export type ProviderRequest = {
   modelId: string;
   input: Array<{ role: "user" | "assistant" | "system"; parts: ContentPart[] }>;
   maxOutputTokens?: number;
+  /** Sent when set. Dropped and retried when the model rejects it. */
+  temperature?: number;
   timeoutMs: number;
 };
 
@@ -165,11 +167,20 @@ export interface ProviderAdapter {
   invokeStream?(request: ProviderRequest, key: string): AsyncIterable<ProviderStreamEvent>;
 }
 
+export type RecommendedModel = {
+  provider: ProviderId;
+  modelId: string;
+};
+
 export type CapabilityPolicy = {
   description: string;
   providers: ProviderId[];
   userCanChooseModel: boolean;
   required: boolean;
+  /** Models this app has tested for the capability. Shown first in settings. */
+  recommendedModels?: RecommendedModel[];
+  /** Used when the user has not chosen. Defaults to the first recommended model. */
+  defaultModel?: RecommendedModel;
 };
 
 export type BudgetPolicy = {

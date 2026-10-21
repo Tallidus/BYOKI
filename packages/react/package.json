@@ -1,6 +1,6 @@
 {
   "name": "@byoki/react",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Settings screen and typed host API client for BYOKI. Requires React 19.",
   "license": "MIT",
   "repository": {

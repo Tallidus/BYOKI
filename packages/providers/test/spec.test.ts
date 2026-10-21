@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { UPSTREAM_ERROR_MESSAGES, detectProvider } from "@byoki/core";
+import { NON_RECOMMENDED_MODEL_WARNING, TASK_UNSUPPORTED_MESSAGE, UPSTREAM_ERROR_MESSAGES, detectProvider } from "@byoki/core";
 import { MANUAL_CATALOG } from "../src/catalog.js";
 
 const root = new URL("../../../spec/", import.meta.url);
@@ -30,6 +30,10 @@ describe("on-device spec data", () => {
 
     const errors = readJson("errors.json");
     expect(errors.messages).toEqual(UPSTREAM_ERROR_MESSAGES);
+    expect(errors.modelChoice).toEqual({
+      notRecommended: NON_RECOMMENDED_MODEL_WARNING,
+      taskUnsupported: TASK_UNSUPPORTED_MESSAGE,
+    });
   });
 
   it("detects keys in the spec order", () => {

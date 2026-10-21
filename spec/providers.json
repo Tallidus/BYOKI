@@ -14,11 +14,13 @@
   "storage": {
     "key": "byoki.v1.key.{provider}",
     "model": "byoki.v1.model.{provider}.{capability}",
+    "ack": "byoki.v1.ack.{provider}.{modelId}",
     "rules": [
       "Store the key only in platform secure storage.",
       "Never use the API key as the storage key name.",
       "Never write the key to logs, analytics, crash reports, URLs, screenshots, localStorage, or SharedPreferences.",
       "Model ids are not secrets.",
+      "An acknowledgment that the user accepted a non-recommended model is stored per model and is not a secret.",
       "After a successful save, clear the entry field and do not display the key again.",
       "Deleting the local key does not revoke it at the provider."
     ]

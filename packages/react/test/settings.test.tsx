@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { UPSTREAM_ERROR_MESSAGES } from "@byoki/core/browser";
+import { NON_RECOMMENDED_MODEL_WARNING, UPSTREAM_ERROR_MESSAGES, modelAckName } from "@byoki/core/browser";
 import { AIConnectionsSettings } from "../src/settings.js";
 import type { ConnectionsClient, ConnectionsView, UsageView } from "../src/client.js";
 
@@ -21,6 +21,8 @@ const view: ConnectionsView = {
       required: true,
       userCanChooseModel: true,
       providers: ["openai"],
+      recommendedModels: [],
+      defaultModel: null,
       selection: null,
       selectionIssue: null,
     },
@@ -106,6 +108,55 @@ describe("AIConnectionsSettings", () => {
       expect(card.queryByText(/invalid-000/)).toBeNull();
       expect(card.queryByText(/sk-test/)).toBeNull();
     }
+  });
+
+  it("warns before saving a model the app did not recommend", async () => {
+    const api = client();
+    api.getModels = vi.fn(async () => ({
+      models: [
+        {
+          id: "gpt-5.6-terra",
+          provider: "openai",
+          capabilities: ["chat", "vision"],
+          displayName: "GPT-5.6 Terra",
+          catalogUpdatedAt: "2026-09-25T00:00:00.000Z",
+          source: "discovered",
+          availabilityCaveat: "listed",
+        },
+        {
+          id: "gpt-4o-mini",
+          provider: "openai",
+          capabilities: ["chat", "vision"],
+          displayName: "GPT-4o mini",
+          catalogUpdatedAt: "2026-09-25T00:00:00.000Z",
+          source: "discovered",
+          availabilityCaveat: "listed",
+        },
+      ],
+      warnings: [],
+    }));
+    const withRecommended: ConnectionsView = {
+      ...view,
+      capabilities: [
+        {
+          ...view.capabilities[0]!,
+          recommendedModels: [{ provider: "openai", modelId: "gpt-5.6-terra" }],
+          defaultModel: { provider: "openai", modelId: "gpt-5.6-terra" },
+        },
+      ],
+    };
+    api.getConnections = vi.fn(async () => withRecommended);
+    render(<AIConnectionsSettings client={api} />);
+    expect(await screen.findByRole("heading", { name: "Garage Assistant" })).toBeTruthy();
+    expect(await screen.findByRole("option", { name: "OpenAI · GPT-5.6 Terra" })).toBeTruthy();
+    const select = screen.getByLabelText("Model for chat");
+    fireEvent.change(select, { target: { value: "openai:gpt-4o-mini" } });
+    expect(screen.getByText(NON_RECOMMENDED_MODEL_WARNING)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save model" })).toHaveProperty("disabled", true);
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Save model" }));
+    await waitFor(() => expect(api.putSelection).toHaveBeenCalledWith("chat", "openai", "gpt-4o-mini"));
+    expect(window.localStorage.getItem(modelAckName("openai", "gpt-4o-mini"))).toBe("1");
   });
 
   it("reloads usage when refreshToken changes", async () => {

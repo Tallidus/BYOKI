@@ -47,7 +47,38 @@ for await (const event of byoki.invokeStream({
 }
 ```
 
-`testKey` lists models at the provider. It does not generate text. `invoke` returns one result. `invokeStream` yields `{ type: "delta", text }` and then `{ type: "done", result }`. A failure before the first delta throws and yields nothing. A failure after a delta throws after those deltas. The thrown message is one of the fixed sentences in the spec. The result does not include provider metadata or request ids.
+`testKey` lists models at the provider. It does not generate text. `discoverModels(apiKey)` lists every model that key can access, tags each one (`chat`, `vision`, `image`, `embedding`, `audio`), and caches the list for the client instance. If the list fails (CORS, network, or permissions), it returns the developer catalog and sets `fallback: true`. Pass `{ capability: "chat" }` to filter. `invoke` returns one result and sends the model id you pass. `invokeStream` yields `{ type: "delta", text }` and then `{ type: "done", result }`. A failure before the first delta throws and yields nothing. A failure after a delta throws after those deltas. The thrown message is one of the fixed sentences in the spec, or the task sentence when the model cannot do the request. The result does not include provider metadata or request ids.
+
+Optional `temperature` is sent only when you set it. A model that rejects `temperature`, or that wants `max_tokens` instead of `max_completion_tokens`, is retried without that parameter.
+
+```ts
+const discovered = await byoki.discoverModels(apiKey, { capability: "chat" });
+const modelId = discovered.models[0]?.id ?? "gpt-5.6-terra";
+```
+
+Declare recommendations where you build the app config:
+
+```ts
+chat: {
+  description: "Stat blocks and answers.",
+  providers: ["openai", "anthropic", "gemini"],
+  userCanChooseModel: true,
+  required: true,
+  recommendedModels: [
+    { provider: "openai", modelId: "gpt-5.6-terra" },
+    { provider: "anthropic", modelId: "claude-sonnet-5" },
+  ],
+  defaultModel: { provider: "openai", modelId: "gpt-5.6-terra" },
+},
+image: {
+  description: "Artwork.",
+  providers: ["openai", "gemini"],
+  recommendedModels: [{ provider: "openai", modelId: "gpt-image-1" }],
+  defaultModel: { provider: "openai", modelId: "gpt-image-1" },
+},
+```
+
+`invoke` still performs chat and vision text generation. Image, embedding, and audio tags are for filtering and for the model the user saved. A request those models cannot do fails with "This model can't do that task. Choose a model that supports it."
 
 Pass an image as raw base64, not a data URL:
 
@@ -105,7 +136,7 @@ await for (final event in client.invokeStream(
 }
 ```
 
-`client.models(provider: 'openai')` is the reviewed catalog. `ByokiPart.image(mimeType: 'image/jpeg', data: base64Encode(bytes))` sends a photo. `detectProvider` uses the prefixes above.
+`client.models(provider: 'openai')` is the reviewed catalog. `client.discoverModels(apiKey)` lists the models that key can access and falls back to the catalog when the provider list fails. `ByokiPart.image(mimeType: 'image/jpeg', data: base64Encode(bytes))` sends a photo. `detectProvider` uses the prefixes above.
 
 Drop in the settings widget. With no arguments it uses `ByokiClient` and `SecureByokiKeyStore`:
 
@@ -115,7 +146,7 @@ const ByokiSettings()
 
 The field is obscured. The widget names the provider as the user pastes, enables **Test and save** when the prefix matches and the trimmed value is at least 8 characters, tests the key, stores it, clears the field, and shows a model picker. **Remove key** deletes the device copy only.
 
-`ByokiSettings(capabilities: ['chat', 'vision'])` adds a picker per capability. Tests pass their own `client` and `store`.
+`ByokiSettings(capabilities: ['chat', 'vision'])` adds a picker per capability. Pass `recommended` and `defaultModels` so the picker can put tested models under **Recommended** and the rest under **All available models**. A custom model id is a text field. Choosing anything outside the recommended list shows the warning from the spec and stores `byoki.v1.ack.<provider>.<modelId>` after the user taps **Use this model**. Tests pass their own `client` and `store`.
 
 ## Other languages
 
@@ -288,11 +319,11 @@ The bearer string is an application session. It is not an OpenAI, Anthropic, or 
 | GET | `/api/ai/usage?from=<ISO>&to=<ISO>` | `from` and `to` optional | Ledger summary. No prompts. |
 | POST | `/api/ai/invoke` | See below | JSON result, or `text/event-stream` |
 
-`:provider` is `openai`, `anthropic`, or `gemini`. `:capability` is `chat` or `vision`.
+`:provider` is `openai`, `anthropic`, or `gemini`. `:capability` is `chat`, `vision`, `image`, `embedding`, or `audio`. `invoke` performs chat and vision text generation. The other capabilities are for discovery, filtering, and the saved model id.
 
 `PUT` creates or replaces the key. The response status is `connected` and does not echo the key. `POST .../test` uses the body key when `apiKey` is a non-empty string, otherwise the stored key. A failed test returns HTTP 200 with `data.ok: false`. `reason` is one of the fixed sentences below. `category` is `invalid_key`, `rate_limited`, `unavailable`, or `unknown`.
 
-`GET /models` without `discover=1` returns catalog models for providers this user has connected. Those ids are the ones `PUT /selections/:capability` will accept. `discover=1` may add extra rows from the provider, but a selection still has to be in the host catalog (`MANUAL_CATALOG` unless you pass a different `catalog`). Ignore discovered ids, or handle `MODEL_UNAVAILABLE`.
+`GET /models` without `discover=1` returns catalog models for providers this user has connected. `discover=1` lists models from the provider for each connected provider. If that list fails, the response keeps the catalog rows for that provider and adds a warning. `PUT /selections/:capability` accepts a catalog id, a discovered id, or another id that matches `^[A-Za-z0-9._:-]+$`. A known catalog model that lacks the capability is `MODEL_INCOMPATIBLE`.
 
 ### Invoke body
 

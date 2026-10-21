@@ -14,6 +14,7 @@ class ByokiMessages {
   static const tooManyMessages = 'A request can include at most 32 messages.';
   static const tooManyParts = 'A message can include at most 8 parts.';
   static const needsContent = 'Each message needs text or parts.';
+  static const taskUnsupported = "This model can't do that task. Choose a model that supports it.";
 
   static const byCategory = <String, String>{
     'invalid_key': invalidKey,

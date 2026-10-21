@@ -16,6 +16,8 @@ export type ConnectionsView = {
     required: boolean;
     userCanChooseModel: boolean;
     providers: ProviderId[];
+    recommendedModels: Array<{ provider: ProviderId; modelId: string; displayName?: string }>;
+    defaultModel: { provider: ProviderId; modelId: string; displayName?: string } | null;
     selection: Selection | null;
     selectionIssue: { code: string; message: string } | null;
   }>;

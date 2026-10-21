@@ -43,6 +43,13 @@ export const UPSTREAM_ERROR_MESSAGES: Record<UpstreamErrorCategory, string> = {
 
 export const MODEL_UNAVAILABLE_MESSAGE = "That model is not available. Choose another model.";
 
+/** Shown when a selected model cannot perform the requested call. */
+export const TASK_UNSUPPORTED_MESSAGE = "This model can't do that task. Choose a model that supports it.";
+
+/** Shown before a non-recommended model is saved. The user must acknowledge it. */
+export const NON_RECOMMENDED_MODEL_WARNING =
+  "This model isn't recommended for this app. It may produce unexpected results, and you're responsible for its output.";
+
 const LOCAL_INVALID_KEY = "Enter a provider API key.";
 const LOCAL_RATE_LIMIT = "Too many connection tests. Wait and try again.";
 const LOCAL_MODEL_MESSAGES = new Set<string>([
@@ -137,6 +144,9 @@ export function messageForVisitor(error: AIConnectionsError): string {
       if (LOCAL_MODEL_MESSAGES.has(error.message)) message = error.message;
       else if (error.message.startsWith("Choose a provider and model for ")) message = error.message;
       else message = MODEL_UNAVAILABLE_MESSAGE;
+      break;
+    case "MODEL_INCOMPATIBLE":
+      message = TASK_UNSUPPORTED_MESSAGE;
       break;
     case "UPSTREAM_UNAVAILABLE":
       message =

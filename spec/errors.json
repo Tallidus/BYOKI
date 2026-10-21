@@ -6,5 +6,9 @@
     "quota": "The provider quota or billing limit was reached. Check the provider account.",
     "unavailable": "The provider is unavailable or the request timed out. Try again later.",
     "unknown": "The provider request failed. Try again."
+  },
+  "modelChoice": {
+    "notRecommended": "This model isn't recommended for this app. It may produce unexpected results, and you're responsible for its output.",
+    "taskUnsupported": "This model can't do that task. Choose a model that supports it."
   }
 }
