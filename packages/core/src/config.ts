@@ -30,7 +30,7 @@ const policySchema = z.object({
 const inputSchema = z
   .object({
     appName: z.string().min(1),
-    capabilities: z.record(capabilitySchema, policySchema),
+    capabilities: z.partialRecord(capabilitySchema, policySchema),
     limits: z
       .object({
         maxOutputTokens: z.number().int().positive().optional(),
@@ -42,7 +42,7 @@ const inputSchema = z
           })
           .optional(),
       })
-      .default({}),
+      .prefault({}),
   })
   .superRefine((value, ctx) => {
     const names = Object.keys(value.capabilities);
